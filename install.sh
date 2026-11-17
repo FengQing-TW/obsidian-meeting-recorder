@@ -1,0 +1,149 @@
+#!/bin/zsh
+# 錄音筆記（Obsidian 外掛＋錄音程式）安裝腳本
+# 用法：在這個 repo 的資料夾裡執行  zsh install.sh
+# 會做的事：檢查環境 → 安裝缺的 Homebrew 套件（先問）→ 放好錄音程式並在本機重新編譯 →
+#           檢查 whisper 模型（沒有就問要不要下載）→ 把外掛裝進 Obsidian vault → 列出要手動允許的權限
+# 可重複執行；既有的檔案會先備份。不會動到 sudo。
+# 環境變數：VAULT_DIR（vault 資料夾，沒給會問）；測試用：CONFIG_DIR、MODEL_DIR、ASSUME_YES=1（全部答是，但不會自動下載模型）
+emulate -L zsh
+setopt err_return no_unset pipe_fail 2>/dev/null
+PKG=${0:A:h}
+STAMP=$(date +%Y%m%d-%H%M%S)
+CONFIG_DIR=${CONFIG_DIR:-$HOME/.config/course-recorder}
+MODEL_DIR=${MODEL_DIR:-$HOME/Library/Application Support/whisper.cpp/models}
+VAULT_DIR=${VAULT_DIR:-}
+BREW=/opt/homebrew/bin/brew
+typeset -a WARN DONE
+
+say()  { print -r -- "$@"; }
+step() { print -r -- ""; print -r -- "▶ $1"; }
+ask()  {   # ask "問題" → 回傳 0 表示同意
+  [[ ${ASSUME_YES:-0} == 1 ]] && return 0
+  local a; read "a?$1 [y/N] "; [[ $a == [yY]* ]]
+}
+backup() {   # backup <路徑>：存在就搬到同層的 .bak-時間
+  [[ -e $1 ]] || return 0
+  mv "$1" "$1.bak-$STAMP" && say "   既有的已備份：$1.bak-$STAMP"
+}
+
+# ---------- 1. 環境 ----------
+step "檢查這台 Mac"
+[[ $(uname -m) == arm64 ]] || { say "✘ 這台不是 Apple Silicon，這套工具不適用（程式和 Homebrew 路徑都是 arm64 的）"; exit 1 }
+OSV=$(sw_vers -productVersion); OSMAJOR=${OSV%%.*}
+say "   macOS $OSV、Apple Silicon"
+HAVE_CLT=1; xcode-select -p >/dev/null 2>&1 || HAVE_CLT=0
+if (( ! HAVE_CLT )); then
+  say "✘ 沒有 Command Line Tools（錄音工具要用它的 python3 和 swiftc）"
+  say "   請先執行：xcode-select --install  裝好後再跑一次這支腳本"
+  exit 1
+fi
+(( OSMAJOR >= 26 )) || WARN+=("macOS $OSV 低於 26：即時字幕用的語音辨識功能這版系統沒有，錄音程式編譯會失敗")
+
+# ---------- 2. Homebrew 套件 ----------
+step "檢查 whisper-cpp、opencc、ffmpeg"
+typeset -a MISSING
+[[ -x /opt/homebrew/bin/whisper-cli ]] || MISSING+=(whisper-cpp)
+[[ -x /opt/homebrew/bin/opencc ]]      || MISSING+=(opencc)
+[[ -x /opt/homebrew/bin/ffmpeg ]]      || MISSING+=(ffmpeg)
+if (( ${#MISSING} == 0 )); then
+  say "   都有了"
+elif [[ ! -x $BREW ]]; then
+  WARN+=("沒有 Homebrew，缺：${MISSING[*]}。裝好 Homebrew（https://brew.sh）後執行：brew install ${MISSING[*]}。沒裝之前：錄音可以錄，但停止後的逐字稿精修、錄影後處理不能用")
+elif ask "   缺 ${MISSING[*]}，要用 Homebrew 安裝嗎？（公司電腦請先確認規範）"; then
+  HOMEBREW_NO_AUTOREMOVE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 $BREW install $MISSING \
+    && DONE+=("Homebrew 套件：${MISSING[*]}") || WARN+=("brew install ${MISSING[*]} 失敗，請手動處理")
+else
+  WARN+=("沒有安裝 ${MISSING[*]}：逐字稿精修、錄影後處理不能用。之後執行：brew install ${MISSING[*]}")
+fi
+
+# ---------- 3. 錄音程式 ----------
+step "安裝錄音程式到 $CONFIG_DIR"
+mkdir -p "$CONFIG_DIR/bin" "$CONFIG_DIR/backup"
+for f in course-recorder.swift ocr.swift Info.plist transcribe.py video_post.py; do
+  [[ -e $CONFIG_DIR/$f ]] && cp -p "$CONFIG_DIR/$f" "$CONFIG_DIR/backup/$f.$STAMP"
+  cp "$PKG/course-recorder/$f" "$CONFIG_DIR/$f"
+done
+# 在這台重新編譯：最低系統版本會對上這台，也不會有從別台複製執行檔被系統擋下的問題
+BUILT=0
+if (( OSMAJOR >= 26 )); then
+  say "   編譯中（約 1 分鐘）…"
+  if ( cd "$CONFIG_DIR" && swiftc -O -swift-version 5 -o bin/course-recorder.new course-recorder.swift \
+         -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist 2>"$CONFIG_DIR/build.log" \
+       && swiftc -O -swift-version 5 -o bin/ocr.new ocr.swift 2>>"$CONFIG_DIR/build.log" ); then
+    mv "$CONFIG_DIR/bin/course-recorder.new" "$CONFIG_DIR/bin/course-recorder"; mv "$CONFIG_DIR/bin/ocr.new" "$CONFIG_DIR/bin/ocr"; BUILT=1
+  else
+    rm -f "$CONFIG_DIR/bin/"*.new
+    say "   編譯失敗（訊息在 $CONFIG_DIR/build.log）"
+  fi
+fi
+if (( BUILT )) && "$CONFIG_DIR/bin/course-recorder" --selftest-limiter >/dev/null 2>&1; then
+  DONE+=("錄音程式（本機編譯）")
+else
+  WARN+=("錄音程式沒有編譯成功或跑不起來（需要 macOS 26 以上與 Command Line Tools）。訊息在 $CONFIG_DIR/build.log")
+fi
+/usr/bin/python3 -I -m py_compile "$CONFIG_DIR/transcribe.py" "$CONFIG_DIR/video_post.py" 2>/dev/null \
+  || WARN+=("/usr/bin/python3 無法執行精修腳本（需要 Command Line Tools 的 python3）")
+
+# ---------- 4. whisper 模型 ----------
+step "whisper 模型"
+MODEL=ggml-large-v3-turbo.bin
+MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL"
+if [[ -s $MODEL_DIR/$MODEL ]]; then
+  say "   已經有了"
+elif [[ ${ASSUME_YES:-0} != 1 ]] && ask "   沒有模型。要現在下載嗎？（1.5 GB，來源：whisper.cpp 在 Hugging Face 的官方模型庫）"; then
+  mkdir -p "$MODEL_DIR"
+  if curl -L --fail --progress-bar -o "$MODEL_DIR/$MODEL.part" "$MODEL_URL"; then
+    mv "$MODEL_DIR/$MODEL.part" "$MODEL_DIR/$MODEL" && DONE+=("whisper 模型（1.5 GB）")
+  else
+    rm -f "$MODEL_DIR/$MODEL.part"; WARN+=("模型下載失敗。手動下載 $MODEL_URL 放到 $MODEL_DIR/")
+  fi
+else
+  WARN+=("沒有 whisper 模型（沒有它，錄完後的逐字稿精修不能用）。下載 $MODEL_URL 放到 $MODEL_DIR/")
+fi
+
+# ---------- 5. Obsidian 外掛 ----------
+step "Obsidian 外掛"
+if [[ -z $VAULT_DIR || ! -d $VAULT_DIR/.obsidian ]]; then
+  [[ -n $VAULT_DIR ]] && say "   找不到 vault：$VAULT_DIR"
+  if [[ ${ASSUME_YES:-0} != 1 ]]; then
+    read "VAULT_DIR?   請輸入 Obsidian vault 的資料夾路徑（裡面有 .obsidian；直接按 Enter 跳過）："
+    VAULT_DIR=${~VAULT_DIR}
+  fi
+fi
+if [[ -n $VAULT_DIR && -d $VAULT_DIR/.obsidian ]]; then
+  PLUG="$VAULT_DIR/.obsidian/plugins/course-recorder"
+  mkdir -p "$VAULT_DIR/.obsidian/plugins"
+  if [[ -d $PLUG ]]; then
+    mkdir -p "$CONFIG_DIR/backup/plugin.$STAMP" && cp -p "$PLUG"/* "$CONFIG_DIR/backup/plugin.$STAMP/" 2>/dev/null
+    [[ -f $PLUG/data.json ]] && cp -p "$PLUG/data.json" "$CONFIG_DIR/backup/plugin.$STAMP.data.json"
+  fi
+  mkdir -p "$PLUG" && cp "$PKG/obsidian-plugin/course-recorder/"{main.js,manifest.json,styles.css} "$PLUG/"
+  # 加進啟用清單（用 JSON 解析，不用文字取代）
+  /usr/bin/python3 -I - "$VAULT_DIR/.obsidian/community-plugins.json" <<'PY' && DONE+=("Obsidian 外掛 → $PLUG") || WARN+=("外掛檔案放好了，但沒能加進啟用清單：請到 Obsidian 設定 → 第三方外掛，打開「錄音筆記（本機）」")
+import json, os, sys
+p = sys.argv[1]
+ids = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else []
+if "course-recorder" not in ids:
+    ids.append("course-recorder")
+    json.dump(ids, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+else
+  WARN+=("沒有安裝 Obsidian 外掛（找不到 vault）。手動做法：把這個 repo 的 obsidian-plugin/course-recorder 複製到 <vault>/.obsidian/plugins/，再到 Obsidian 設定啟用")
+fi
+
+# ---------- 6. 結果 ----------
+print -r -- ""; print -r -- "════════ 結果 ════════"
+for d in $DONE; do say "✔ $d"; done
+for w in $WARN; do say "⚠ $w"; done
+cat <<TXT
+
+接下來要手動做的（系統不允許腳本代勞）：
+1. 重新啟動 Obsidian；左側功能列會出現 🎤。第一次按錄音時依序允許 Obsidian：
+   麥克風、系統錄音（螢幕與系統錄音）、語音辨識；要錄 App 畫面再允許螢幕錄製（允許後要重開 Obsidian）
+2. 第一次用即時字幕，macOS 可能要下載中文語音辨識模型（需要網路，約幾百 MB）
+3. 搭配 AnnotateScreen（選用，github.com/chukuolung/annotate-screen）時，截圖要自動收進筆記：
+   第一次會問 Obsidian 能不能取用「下載」資料夾，請允許
+說明文件：docs/使用說明.md
+提醒：這個工具會錄下所有人的聲音。用在會議時，錄音前請先告知對方。
+TXT
+(( ${#WARN} == 0 ))
