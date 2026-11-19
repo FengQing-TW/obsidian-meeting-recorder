@@ -86,7 +86,7 @@ zsh install.sh
 
 裝完重新啟動 Obsidian，左側會出現麥克風按鈕。第一次使用要依序允許 Obsidian 的麥克風、系統錄音、語音辨識權限；要錄 App 畫面再允許螢幕錄製。
 
-外掛已送審 Obsidian 社群外掛目錄。不管是從目錄裝外掛，還是用上面的方式安裝，都要在終端機執行一次 `install.sh`：它會在本機編譯錄音程式，外掛靠這支程式錄音。
+外掛已上架 [Obsidian 社群外掛目錄](https://community.obsidian.md/plugins/meeting-recorder)，可以在 Obsidian 的「設定 → 第三方外掛」搜尋 Meeting Recorder 安裝。不管從哪裡裝外掛，都要在終端機執行一次 `install.sh`：它會在本機編譯錄音程式，外掛靠這支程式錄音。
 
 ## 已知限制
 
