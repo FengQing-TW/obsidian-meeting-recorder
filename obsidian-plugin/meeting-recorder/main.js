@@ -10,7 +10,8 @@
 // 5. 每場錄音的狀態存在 ~/.config/course-recorder/tmp/<id>/session.json；Obsidian 中途關閉或當掉，
 //    下次啟動會自動把沒做完的（插入錄音檔、whisper 精修）補完
 // 說明：README.md 與 docs/使用說明.md
-const { Plugin, Notice, Menu, setIcon, MarkdownView, TFile, normalizePath, moment } = require("obsidian");
+const obsidian = require("obsidian");
+const { Plugin, Notice, Menu, setIcon, MarkdownView, TFile, normalizePath, moment } = obsidian;
 const { spawn, execFile, execFileSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -27,8 +28,9 @@ let ZH = true;
 const T = (zh, en) => (ZH ? zh : en);
 const pickLang = (setting) => {
   if (setting === "zh" || setting === "en") return setting === "zh";
+  // Obsidian 1.8 起有 getLanguage()；舊版退回 moment 的語系（Obsidian 會把它設成介面語言）。只用官方 API（市集審查建議）
   let ui = "";
-  try { ui = window.localStorage.getItem("language") || ""; } catch (_) { /* 取不到就看 moment */ }
+  try { ui = typeof obsidian.getLanguage === "function" ? obsidian.getLanguage() : ""; } catch (_) { /* 取不到就看 moment */ }
   return (ui || moment.locale() || "en").toLowerCase().startsWith("zh");
 };
 let VIDEO_DIR = path.join(os.homedir(), "Downloads/螢幕錄影");   // 錄影檔：使用者過一陣子會自己刪（英文介面是 Downloads/Screen Recordings）

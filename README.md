@@ -3,6 +3,8 @@
 Record online meetings and classes from inside Obsidian on macOS: system audio + microphone in one click, live transcript while recording, a whisper re-transcription afterwards, and screenshots/slides placed on the transcript timeline. Speech and text recognition run on your Mac.
 Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese; the English summary is below.
 
+![一篇錄音筆記：逐字稿分對方和自己、投影片對上時間、點時間就播放](docs/images/overview.jpg)
+
 ## English summary
 
 **Before you install**
@@ -30,6 +32,34 @@ Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese; the English 
 - 語音辨識用 macOS 內建功能與本機的 whisper 模型，文字辨識用 macOS 內建的 Vision。錄音與辨識的程式沒有連網路的程式碼；只有安裝腳本在你同意時會下載模型
 
 完整用法、設定、出狀況時的行為與已知限制，見 [docs/使用說明.md](docs/使用說明.md)。
+
+## 使用情境
+
+以下畫面都是示意，內容為示範資料。
+
+### 線上會議：邊開邊有逐字稿
+
+用 Teams 這類線上會議開會時，按一下左側按鈕就開始錄。它錄的是電腦播出的聲音，不挑會議軟體；實際測過的是 Teams。對方說的話和你說的話分開標示，會議還沒結束，筆記裡已經有大半的紀錄。
+
+![錄音中：逐字稿即時寫進筆記，狀態列顯示錄音時間](docs/images/recording-live.jpg)
+
+### 教育訓練、簡報說明：投影片對上講到的地方
+
+同時錄簡報那個 App 的畫面，換頁時自動截圖，排到講到那一頁的時間。錄完用 whisper 整段重新辨識，複習時點時間就從那一句開始聽。
+
+![錄完之後：精修版逐字稿、投影片截圖、會後補充的筆記都在同一篇](docs/images/recording-refined.jpg)
+
+### 需要顧慮隱私的訪談
+
+聲音只在你的 Mac 上處理：即時逐字稿用 macOS 內建的語音辨識，精修用本機的 whisper 模型。錄音與辨識的程式沒有連網路的程式碼。
+
+![運作方式：錄下兩路聲音、即時逐字稿、錄完精修、整理成一篇筆記](docs/images/recording-flow.jpg)
+
+### 搭配 AnnotateScreen：畫好的重點自動收進筆記
+
+分享螢幕時用 [AnnotateScreen](https://github.com/FengQing-TW/annotate-screen) 在畫面上畫重點，按 ⌃⌥S 截圖。錄音中的截圖會自動排進逐字稿，對上截圖的那一秒。
+
+![AnnotateScreen 的截圖自動收進會議筆記](docs/images/with-annotatescreen.jpg)
 
 ## 錄音前請先告知對方
 
