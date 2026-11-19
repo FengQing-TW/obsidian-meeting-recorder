@@ -1,7 +1,24 @@
 # Obsidian 錄音筆記（Meeting Recorder）
 
 Record online meetings and classes from inside Obsidian on macOS: system audio + microphone in one click, live transcript while recording, a whisper re-transcription afterwards, and screenshots/slides placed on the transcript timeline. Speech and text recognition run on your Mac.
-Apple Silicon, macOS 26+. Docs are in Traditional Chinese.
+Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese; the English summary is below.
+
+## English summary
+
+**Before you install**
+
+- **macOS only, Apple Silicon, macOS 26 or later.** The plugin is desktop-only.
+- **The plugin needs a separate one-time setup.** Installing the plugin alone is not enough: run `zsh install.sh` from this repository in Terminal. It compiles a small Swift recorder on your Mac and places it in `~/.config/course-recorder/`. Without it the record button shows "recorder not found".
+- **Transcription currently supports Mandarin Chinese only** (live transcript and whisper refinement). The interface follows Obsidian's language (Chinese or English).
+- **Please tell other participants before you record.** It records everything your Mac plays, including other people in a meeting. Follow your organizer's rules and local law.
+
+**Disclosures (as required by the Obsidian developer policies)**
+
+- **Files outside your vault:** the plugin runs the recorder and scripts in `~/.config/course-recorder/`, keeps temporary audio there until a transcript is finished, saves screen recordings to `~/Downloads/Screen Recordings/` (or `~/Downloads/螢幕錄影/` with the Chinese interface), and watches `~/Downloads` for AnnotateScreen screenshots to import.
+- **Network use:** the plugin and the recorder make no network requests. Speech and text recognition use the macOS built-in recognizers and a local whisper model. Only `install.sh` uses the network, and only after you confirm: Homebrew packages and the 1.5 GB whisper model from Hugging Face. macOS may download its own speech recognition assets the first time.
+- **No account, no payment, no ads, no telemetry.**
+
+**Settings:** to force the interface language, add `"lang": "en"` or `"lang": "zh"` to the plugin's `data.json` (default `"auto"` follows Obsidian).
 
 在 Obsidian 按一顆按鈕，同時錄下**電腦播出的聲音**和**麥克風**，逐字稿、截圖、投影片都收進同一篇筆記。線上會議、課程、訓練都能用。
 

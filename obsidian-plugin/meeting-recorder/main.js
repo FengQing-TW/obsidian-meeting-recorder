@@ -21,16 +21,29 @@ const BIN = path.join(DIR, "bin/course-recorder");
 const OCR = path.join(DIR, "bin/ocr");
 const TRANSCRIBE = path.join(DIR, "transcribe.py");
 const VIDEO_POST = path.join(DIR, "video_post.py");
-const VIDEO_DIR = path.join(os.homedir(), "Downloads/螢幕錄影");   // 錄影檔：使用者過一陣子會自己刪
+// 介面語言（2026-11-19，準備上架 Obsidian 市集）：data.json 的 lang＝"zh"／"en"／"auto"（預設，跟著 Obsidian 的介面語言）。
+// 在 onload 一開始決定，之後不變；寫進筆記的標題與說話者也跟著這個語言，解析時兩種都認。
+let ZH = true;
+const T = (zh, en) => (ZH ? zh : en);
+const pickLang = (setting) => {
+  if (setting === "zh" || setting === "en") return setting === "zh";
+  let ui = "";
+  try { ui = window.localStorage.getItem("language") || ""; } catch (_) { /* 取不到就看 moment */ }
+  return (ui || moment.locale() || "en").toLowerCase().startsWith("zh");
+};
+let VIDEO_DIR = path.join(os.homedir(), "Downloads/螢幕錄影");   // 錄影檔：使用者過一陣子會自己刪（英文介面是 Downloads/Screen Recordings）
 const DOWNLOADS = path.join(os.homedir(), "Downloads");
 const ANNOTATE_RE = /^AnnotateScreen_\d{8}_\d{6}(?:_\d+)?\.png$/;   // AnnotateScreen 的存檔檔名
 const VIDEO_RE = /🎬 \[[^\]]*\]\((file:\/\/[^)]+)\)(?:\s*%%video-offset (-?[\d.]+)%%)?/;
 const TMP = path.join(DIR, "tmp");
 const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "tif", "tiff"];
-const HEADING = "### 🎙️ 錄音 ";
+let HEADING = "### 🎙️ 錄音 ";
+const HEADINGS = ["### 🎙️ 錄音 ", "### 🎙️ Recording "];
+const isHeading = (l) => HEADINGS.some((x) => l.startsWith(x));
+const WHO_EN = { "對方": "Them", "我": "Me" };
 const TIME_RE = /^(\d{1,2}:)?\d{1,2}:\d{2}$/;
 const ITEM_RE = /^- `((?:\d{1,2}:)?\d{1,2}:\d{2})` /;                               // 帶時間的一行
-const OWN_RE = /^- `(?:\d{1,2}:)?\d{1,2}:\d{2}` (?:\*\*(?:對方|我)\*\*：|📷 |🖼️ )/;     // 外掛自己產生的一行
+const OWN_RE = /^- `(?:\d{1,2}:)?\d{1,2}:\d{2}` (?:\*\*(?:對方|我|Them|Me)\*\*(?:：|: )|📷 |🖼️ )/;     // 外掛自己產生的一行
 const MARK_START_RE = /%%course-rec \d+ start%%/, MARK_END_RE = /%%course-rec \d+ end%%/;
 // 引用區塊（截圖／投影片的辨識文字）裡的行不算標記。2026-11-17 實際發生：錄影選到 Obsidian 自己的視窗，
 // 文字辨識把畫面上的「%%course-rec … end%%」原樣認出來 103 次；截圖在錄音中途進筆記的話，結束標記會被認錯
@@ -45,12 +58,12 @@ const fmtTime = (sec) => {
   return h ? `${h}:${p(m)}:${p(r)}` : `${p(m)}:${p(r)}`;
 };
 const parseTime = (t) => t.split(":").map(Number).reduce((a, n) => a * 60 + n, 0);
-const segLine = (seg) => `- \`${fmtTime(seg.start)}\` **${seg.who}**：${seg.text}`;
+const segLine = (seg) => `- \`${fmtTime(seg.start)}\` **${ZH ? seg.who : (WHO_EN[seg.who] || seg.who)}**${T("：", ": ")}${seg.text}`;
 const imageLines = (img) => {
   const slide = img.kind === "slide";
   const out = [`- \`${fmtTime(img.start)}\` ${slide ? "🖼️" : "📷"} ${img.link}`];
   if (img.ocr && img.ocr.trim()) {
-    out.push(`  > [!quote]- ${slide ? "投影片文字" : "截圖文字"}`);
+    out.push(`  > [!quote]- ${slide ? T("投影片文字", "Slide text") : T("截圖文字", "Screenshot text")}`);
     for (const l of img.ocr.trim().split("\n")) out.push(`  > ${l}`);
   }
   return out.join("\n");
@@ -82,23 +95,31 @@ const alive = (pid, needle) => {
 
 module.exports = class CourseRecorder extends Plugin {
   onload() {
+    let langSetting = "auto";
+    try {
+      const f = path.join(this.app.vault.adapter.getBasePath(), this.manifest.dir, "data.json");
+      langSetting = (JSON.parse(fs.readFileSync(f, "utf8")) || {}).lang || "auto";
+    } catch (_) { /* 第一次安裝還沒有 data.json */ }
+    ZH = pickLang(langSetting);
+    HEADING = ZH ? HEADINGS[0] : HEADINGS[1];
+    VIDEO_DIR = path.join(os.homedir(), ZH ? "Downloads/螢幕錄影" : "Downloads/Screen Recordings");
     this.proc = null;
     this.recording = null;
     this.busy = false;
     this.player = null;
     this.refineChain = Promise.resolve();   // whisper 一次只跑一個（模型吃 1.6 GB 以上）
-    this.ribbon = this.addRibbonIcon("mic", "錄音筆記：開始", (evt) => this.toggle(evt));
+    this.ribbon = this.addRibbonIcon("mic", T("錄音筆記：開始", "Meeting Recorder: start"), (evt) => this.toggle(evt));
     // 狀態列：錄音中顯示經過時間，點一下停止（左側按鈕只有顏色，看不出錄了多久、還有沒有在錄）
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("course-rec-status");
-    this.statusEl.setAttribute("aria-label", "點一下停止錄音");
+    this.statusEl.setAttribute("aria-label", T("點一下停止錄音", "Click to stop recording"));
     this.registerDomEvent(this.statusEl, "click", () => { if (this.proc) this.stop(); });
     this.registerInterval(window.setInterval(() => this.refreshStatus(), 1000));
-    this.addCommand({ id: "start", name: "開始錄音（電腦聲音＋麥克風＋即時逐字稿）", callback: () => this.start(false) });
-    this.addCommand({ id: "start-video", name: "開始錄音＋錄 App 畫面", callback: () => this.start(true) });
-    this.addCommand({ id: "stop", name: "停止錄音並插入筆記", callback: () => this.stop() });
-    this.addCommand({ id: "stop-playback", name: "停止播放錄音", callback: () => this.player?.pause() });
-    this.addCommand({ id: "recover", name: "補做沒完成的逐字稿精修", callback: () => this.recoverOrphans(true) });
+    this.addCommand({ id: "start", name: T("開始錄音（電腦聲音＋麥克風＋即時逐字稿）", "Start recording (system audio + microphone + live transcript)"), callback: () => this.start(false) });
+    this.addCommand({ id: "start-video", name: T("開始錄音＋錄 App 畫面", "Start recording + record an app window"), callback: () => this.start(true) });
+    this.addCommand({ id: "stop", name: T("停止錄音並插入筆記", "Stop recording and insert into note"), callback: () => this.stop() });
+    this.addCommand({ id: "stop-playback", name: T("停止播放錄音", "Stop playback"), callback: () => this.player?.pause() });
+    this.addCommand({ id: "recover", name: T("補做沒完成的逐字稿精修", "Finish incomplete transcript refinement"), callback: () => this.recoverOrphans(true) });
     this.registerEvent(this.app.vault.on("create", (f) => this.onFileCreated(f)));
     this.registerEvent(this.app.vault.on("rename", (f) => {
       if (this.recording?.noteFile === f) this.saveSession(this.recording);   // 筆記改名或搬家：記下新路徑
@@ -116,7 +137,7 @@ module.exports = class CourseRecorder extends Plugin {
     this.app.workspace.onLayoutReady(() => this.recoverOrphans(false));
     // AnnotateScreen 截圖自動收進筆記（可用命令暫停；設定存在外掛的 data.json）
     this.importing = new Set();
-    this.addCommand({ id: "toggle-annotate-import", name: "開啟／暫停自動收 AnnotateScreen 截圖", callback: () => this.toggleAnnotateImport() });
+    this.addCommand({ id: "toggle-annotate-import", name: T("開啟／暫停自動收 AnnotateScreen 截圖", "Toggle auto-import of AnnotateScreen screenshots"), callback: () => this.toggleAnnotateImport() });
     this.loadData().then((d) => {
       this.settings = Object.assign({ annotateImport: true }, d || {});
       if (this.settings.annotateImport) this.startAnnotateWatch();
@@ -134,7 +155,7 @@ module.exports = class CourseRecorder extends Plugin {
   refresh() {
     const r = !!this.proc;
     setIcon(this.ribbon, r ? "square" : "mic");
-    this.ribbon.setAttribute("aria-label", r ? "錄音筆記：停止" : "錄音筆記：開始");
+    this.ribbon.setAttribute("aria-label", r ? T("錄音筆記：停止", "Meeting Recorder: stop") : T("錄音筆記：開始", "Meeting Recorder: start"));
     this.ribbon.toggleClass("course-rec-active", r);
     this.refreshStatus();
   }
@@ -145,9 +166,9 @@ module.exports = class CourseRecorder extends Plugin {
     if (!this.proc || !rec) { this.statusEl.setText(""); this.statusEl.hide(); return; }
     this.statusEl.show();
     let text;
-    if (rec.stopping) text = "■ 存檔中…";
-    else if (!rec.audioAt) text = "● 準備中…";
-    else text = `● 錄音 ${fmtTime((Date.now() - rec.audioAt) / 1000 - rec.gap)}${rec.video?.saved === false && rec.video?.offset != null ? "＋錄影" : ""}${rec.stalled ? "（收音中斷）" : ""}`;
+    if (rec.stopping) text = T("■ 存檔中…", "■ Saving…");
+    else if (!rec.audioAt) text = T("● 準備中…", "● Preparing…");
+    else text = `${T("● 錄音", "● REC")} ${fmtTime((Date.now() - rec.audioAt) / 1000 - rec.gap)}${rec.video?.saved === false && rec.video?.offset != null ? T("＋錄影", " + video") : ""}${rec.stalled ? T("（收音中斷）", " (audio interrupted)") : ""}`;
     this.statusEl.setText(text);
   }
 
@@ -156,8 +177,8 @@ module.exports = class CourseRecorder extends Plugin {
     if (this.proc) return this.stop();
     if (!evt) return this.start(false);
     const menu = new Menu();
-    menu.addItem((i) => i.setTitle("只錄音").setIcon("mic").onClick(() => this.start(false)));
-    menu.addItem((i) => i.setTitle("錄音＋錄 App 畫面…").setIcon("monitor").onClick(() => this.start(true)));
+    menu.addItem((i) => i.setTitle(T("只錄音", "Audio only")).setIcon("mic").onClick(() => this.start(false)));
+    menu.addItem((i) => i.setTitle(T("錄音＋錄 App 畫面…", "Audio + app window…")).setIcon("monitor").onClick(() => this.start(true)));
     menu.showAtMouseEvent(evt);
   }
 
@@ -208,12 +229,12 @@ module.exports = class CourseRecorder extends Plugin {
     if (rec.noteFile && this.app.vault.getAbstractFileByPath(rec.noteFile.path) === rec.noteFile) return;
     const { start, end } = this.markers(rec.id);
     const folder = this.app.fileManager.getNewFileParent("");
-    const base = `錄音 ${rec.label.replace(":", "")}`;
+    const base = `${T("錄音", "Recording")} ${rec.label.replace(":", "")}`;
     let p = normalizePath(`${folder.path}/${base}.md`);
     for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder.path}/${base} (${i}).md`);
     rec.noteFile = await this.app.vault.create(p, `${HEADING}${rec.label}\n${start}\n${end}\n`);
     this.saveSession(rec);
-    new Notice(`錄音筆記：原本的筆記找不到了，逐字稿改寫到「${rec.noteFile.basename}」`, 15000);
+    new Notice(T(`錄音筆記：原本的筆記找不到了，逐字稿改寫到「${rec.noteFile.basename}」`, `Meeting Recorder: the original note is gone; the transcript now goes to "${rec.noteFile.basename}"`), 15000);
   }
 
   // 所有改筆記的動作排隊執行，避免互相覆蓋；單一動作失敗不影響後面的
@@ -237,7 +258,7 @@ module.exports = class CourseRecorder extends Plugin {
     const s = lines.findIndex((l) => l.includes(start) && !isQuote(l));
     const e = s < 0 ? -1 : lines.findIndex((l, i) => i > s && l.includes(end) && !isQuote(l));
     let h = -1;
-    for (let i = s - 1; s >= 0 && i >= Math.max(0, s - 3) && h < 0; i--) if (lines[i].startsWith(HEADING)) h = i;
+    for (let i = s - 1; s >= 0 && i >= Math.max(0, s - 3) && h < 0; i--) if (isHeading(lines[i])) h = i;
     return { s, e, h };
   }
 
@@ -289,14 +310,14 @@ module.exports = class CourseRecorder extends Plugin {
     });
     if (best) return best.view.file;
     const folder = this.app.fileManager.getNewFileParent("");
-    const note = await this.app.vault.create(normalizePath(`${folder.path}/錄音 ${moment().format("YYYY-MM-DD HHmm")}.md`), "");
+    const note = await this.app.vault.create(normalizePath(`${folder.path}/${T("錄音", "Recording")} ${moment().format("YYYY-MM-DD HHmm")}.md`), "");
     await this.app.workspace.getLeaf(false).openFile(note);
     return note;
   }
 
   async insertBlock(rec) {
     const { start, end } = this.markers(rec.id);
-    const head = `${HEADING}${rec.label}（錄音中${rec.live ? "，逐字稿即時更新" : ""}）`;
+    const head = `${HEADING}${rec.label}${T(`（錄音中${rec.live ? "，逐字稿即時更新" : ""}）`, ` (recording${rec.live ? ", live transcript" : ""})`)}`;
     const view = this.findView(rec.noteFile);
     if (!(view && view.getMode() === "source")) {
       await this.editNote(rec.noteFile, (t) => `${t.replace(/\n*$/, "")}\n\n${head}\n${start}\n${end}\n`);
@@ -340,7 +361,7 @@ module.exports = class CourseRecorder extends Plugin {
     this.busy = true;
     try {
       if (!fs.existsSync(BIN)) {
-        new Notice(`錄音筆記：找不到錄音程式 ${BIN}`, 15000);
+        new Notice(T(`錄音筆記：找不到錄音程式 ${BIN}`, `Meeting Recorder: recorder not found at ${BIN}. Run install.sh first.`), 15000);
         return;
       }
       const note = await this.pickNote();
@@ -380,7 +401,7 @@ module.exports = class CourseRecorder extends Plugin {
       });
       if (!started) {
         proc.kill("SIGINT");
-        new Notice(`錄音筆記：沒有開始錄音\n${stderr.trim()}`, 15000);
+        new Notice(T(`錄音筆記：沒有開始錄音\n${stderr.trim()}`, `Meeting Recorder: recording did not start\n${stderr.trim()}`), 15000);
         return;
       }
       this.proc = proc;
@@ -390,12 +411,12 @@ module.exports = class CourseRecorder extends Plugin {
       this.saveSession(rec);
       await this.insertBlock(rec);
 
-      const where = this.app.workspace.getActiveFile() === note ? "" : `逐字稿寫進「${note.basename}」。`;
-      rec.waiting = new Notice(`錄音筆記：準備中…${where}（AirPods 切換到通話模式，最多約 10 秒）`, 0);
+      const where = this.app.workspace.getActiveFile() === note ? "" : T(`逐字稿寫進「${note.basename}」。`, ` Transcript goes to "${note.basename}".`);
+      rec.waiting = new Notice(T(`錄音筆記：準備中…${where}（AirPods 切換到通話模式，最多約 10 秒）`, `Meeting Recorder: preparing…${where} (switching the headset to call mode can take up to about 10 seconds)`), 0);
       if (rec.audioAt) rec.waiting.hide();
     } catch (e) {
       console.error("course-recorder start", e);
-      new Notice(`錄音筆記：開始失敗 ${e}`, 15000);
+      new Notice(T(`錄音筆記：開始失敗 ${e}`, `Meeting Recorder: failed to start ${e}`), 15000);
     } finally {
       this.busy = false;
       this.refresh();
@@ -411,7 +432,7 @@ module.exports = class CourseRecorder extends Plugin {
     } else if (l === "AUDIO") {
       rec.audioAt = Date.now();   // 錄音檔的第 0 秒
       rec.waiting?.hide();
-      new Notice(`● 錄音筆記：開始收音${rec.live ? "（逐字稿約晚 10～20 秒出現）" : ""}`);
+      new Notice(T(`● 錄音筆記：開始收音${rec.live ? "（逐字稿約晚 10～20 秒出現）" : ""}`, `● Meeting Recorder: recording${rec.live ? " (the transcript appears 10–20 seconds behind)" : ""}`));
     } else if (l.startsWith("SEG\t")) {
       const [, who, s, e, ...rest] = l.split("\t");
       const start = parseFloat(s);
@@ -422,23 +443,23 @@ module.exports = class CourseRecorder extends Plugin {
       rec.empty = true;
     } else if (l === "STALLED") {
       rec.stalled = true;
-      rec.stallNotice = new Notice("⚠️ 錄音筆記：收音中斷了（耳機斷線或音訊裝置被換掉？）\n已經錄到的部分不受影響。裝置接回來會自動繼續；也可以按停止存檔後重新開始。", 0);
+      rec.stallNotice = new Notice(T("⚠️ 錄音筆記：收音中斷了（耳機斷線或音訊裝置被換掉？）\n已經錄到的部分不受影響。裝置接回來會自動繼續；也可以按停止存檔後重新開始。", "⚠️ Meeting Recorder: audio input stopped (headset disconnected or audio device changed?)\nWhat was recorded so far is safe. Recording resumes when the device is back, or press stop to save and start again."), 0);
     } else if (l.startsWith("RESUMED")) {
       rec.gap = parseFloat(l.slice(8)) || rec.gap;   // 累計中斷秒數：錄音檔的時間軸比牆上時鐘短這麼多
       rec.stalled = false;
       rec.stallNotice?.hide();
-      new Notice(`錄音筆記：收音恢復了（中間約 ${Math.round(rec.gap)} 秒沒有錄到）`, 8000);
+      new Notice(T(`錄音筆記：收音恢復了（中間約 ${Math.round(rec.gap)} 秒沒有錄到）`, `Meeting Recorder: audio is back (about ${Math.round(rec.gap)} seconds were not recorded)`), 8000);
     } else if (l.startsWith("EXCLUDED_PLAYING ")) {
-      new Notice(`⚠️ ${l.slice(17)} 正在播放，但設定為不錄它的聲音。`, 15000);
+      new Notice(T(`⚠️ ${l.slice(17)} 正在播放，但設定為不錄它的聲音。`, `⚠️ ${l.slice(17)} is playing, but it is excluded from recording in your settings.`), 15000);
     } else if (l.startsWith("LIVE_FAILED")) {
-      new Notice(`⚠️ 即時逐字稿無法啟動，只錄音；停止後仍會用 whisper 產生逐字稿。\n${l.slice(12)}`, 15000);
+      new Notice(T(`⚠️ 即時逐字稿無法啟動，只錄音；停止後仍會用 whisper 產生逐字稿。\n${l.slice(12)}`, `⚠️ Live transcript could not start; recording audio only. whisper will still produce a transcript after you stop.\n${l.slice(12)}`), 15000);
     } else if (l.startsWith("LIVE_STOPPED")) {
-      new Notice(`⚠️ 「${l.slice(13)}」的即時逐字稿中斷了。錄音不受影響，停止後 whisper 會補上完整逐字稿。`, 15000);
+      new Notice(T(`⚠️ 「${l.slice(13)}」的即時逐字稿中斷了。錄音不受影響，停止後 whisper 會補上完整逐字稿。`, `⚠️ Live transcript for "${WHO_EN[l.slice(13)] || l.slice(13)}" stopped. Recording is not affected; whisper will produce the full transcript after you stop.`), 15000);
     } else if (l === "VIDEO_PICKING") {
-      rec.pickNotice = new Notice("🎬 請在跳出的視窗選擇要錄的 App 或視窗（錄音已經開始了）", 0);
+      rec.pickNotice = new Notice(T("🎬 請在跳出的視窗選擇要錄的 App 或視窗（錄音已經開始了）", "🎬 Choose the app or window to record in the system picker (audio recording has already started)"), 0);
     } else if (l.startsWith("VIDEO_STARTED")) {
       rec.pickNotice?.hide();
-      new Notice(`● 錄影開始：存到「下載／螢幕錄影」\n${path.basename(rec.video?.path || "")}`, 8000);
+      new Notice(T(`● 錄影開始：存到「下載／螢幕錄影」\n${path.basename(rec.video?.path || "")}`, `● Video recording started: saving to Downloads/Screen Recordings\n${path.basename(rec.video?.path || "")}`), 8000);
     } else if (l.startsWith("VIDEO_OFFSET ")) {
       if (rec.video) { rec.video.offset = parseFloat(l.slice(13)); this.saveSession(rec); }
     } else if (l.startsWith("VIDEO_SAVED")) {
@@ -447,14 +468,14 @@ module.exports = class CourseRecorder extends Plugin {
       rec.pickNotice?.hide();
       rec.video = null;
       this.saveSession(rec);
-      new Notice("錄音筆記：沒有選 App，這次只錄音", 8000);
+      new Notice(T("錄音筆記：沒有選 App，這次只錄音", "Meeting Recorder: no app selected; recording audio only"), 8000);
     } else if (l.startsWith("VIDEO_FAILED")) {
       rec.pickNotice?.hide();
-      new Notice(`⚠️ 錄影失敗，錄音不受影響：${l.slice(13)}\n第一次使用要到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」允許 Obsidian`, 20000);
+      new Notice(T(`⚠️ 錄影失敗，錄音不受影響：${l.slice(13)}\n第一次使用要到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」允許 Obsidian`, `⚠️ Video recording failed; audio is not affected: ${l.slice(13)}\nOn first use, allow Obsidian in System Settings → Privacy & Security → Screen & System Audio Recording`), 20000);
     } else if (l.startsWith("VIDEO_STOPPED")) {
-      new Notice(`⚠️ 錄影中斷了（被錄的 App 結束了？），錄音不受影響：${l.slice(14)}`, 15000);
+      new Notice(T(`⚠️ 錄影中斷了（被錄的 App 結束了？），錄音不受影響：${l.slice(14)}`, `⚠️ Video recording stopped (did the recorded app quit?); audio is not affected: ${l.slice(14)}`), 15000);
     } else if (l.startsWith("WARN ")) {
-      new Notice(`⚠️ 錄音筆記：${l.slice(5)}`, 20000);
+      new Notice(`⚠️ ${T("錄音筆記：", "Meeting Recorder: ")}${l.slice(5)}`, 20000);
     }
   }
 
@@ -533,7 +554,7 @@ module.exports = class CourseRecorder extends Plugin {
       });
     } catch (e) {
       console.error("course-recorder watch Downloads", e);
-      new Notice(`沒辦法監看「下載」資料夾，AnnotateScreen 截圖不會自動收進筆記：${e}\n（第一次要允許 Obsidian 取用「下載」）`, 15000);
+      new Notice(T(`沒辦法監看「下載」資料夾，AnnotateScreen 截圖不會自動收進筆記：${e}\n（第一次要允許 Obsidian 取用「下載」）`, `Cannot watch the Downloads folder, so AnnotateScreen screenshots will not be imported: ${e}\n(Allow Obsidian to access Downloads on first use)`), 15000);
     }
   }
 
@@ -544,8 +565,8 @@ module.exports = class CourseRecorder extends Plugin {
       if (attempt < 2 && fs.existsSync(path.join(DOWNLOADS, name))) {
         setTimeout(() => { if (this.annotateWatcher) this.tryImportAnnotate(name, attempt + 1); }, 5000);
       } else {
-        const where = fs.existsSync(path.join(DOWNLOADS, name)) ? "原檔留在「下載」" : "圖已在 vault 的附件資料夾，但沒有插進筆記";
-        new Notice(`AnnotateScreen 截圖沒有收進筆記（${where}）：${name}\n${e}`, 12000);
+        const where = fs.existsSync(path.join(DOWNLOADS, name)) ? T("原檔留在「下載」", "the file is still in Downloads") : T("圖已在 vault 的附件資料夾，但沒有插進筆記", "the image is in the vault attachment folder but was not inserted");
+        new Notice(T(`AnnotateScreen 截圖沒有收進筆記（${where}）：${name}\n${e}`, `AnnotateScreen screenshot was not imported (${where}): ${name}\n${e}`), 12000);
       }
     });
   }
@@ -559,7 +580,7 @@ module.exports = class CourseRecorder extends Plugin {
     this.settings.annotateImport = !this.settings.annotateImport;
     await this.saveData(this.settings);
     if (this.settings.annotateImport) this.startAnnotateWatch(); else this.stopAnnotateWatch();
-    new Notice(`AnnotateScreen 截圖自動收進筆記：${this.settings.annotateImport ? "開啟" : "暫停"}`);
+    new Notice(T(`AnnotateScreen 截圖自動收進筆記：${this.settings.annotateImport ? "開啟" : "暫停"}`, `AnnotateScreen auto-import: ${this.settings.annotateImport ? "on" : "paused"}`));
   }
 
   // 等檔案寫完：大小連續兩次一樣才算好（最多等 5 秒）
@@ -589,10 +610,10 @@ module.exports = class CourseRecorder extends Plugin {
 
   async importAnnotate(name) {
     const src = path.join(DOWNLOADS, name);
-    if (!(await this.waitStable(src))) throw new Error("檔案一直沒寫完");
+    if (!(await this.waitStable(src))) throw new Error(T("檔案一直沒寫完", "the file never finished writing"));
     const takenAt = fs.statSync(src).birthtimeMs || Date.now();   // 截圖當下的時間，不是匯入的時間
     const note = this.annotateTarget();
-    if (!note) { new Notice(`沒有打開的筆記，AnnotateScreen 截圖留在「下載」：${name}`, 8000); return; }
+    if (!note) { new Notice(T(`沒有打開的筆記，AnnotateScreen 截圖留在「下載」：${name}`, `No note is open; the AnnotateScreen screenshot stays in Downloads: ${name}`), 8000); return; }
     const dest = normalizePath(await this.app.fileManager.getAvailablePathForAttachment(name, note.path));
     const dir = path.posix.dirname(dest);
     if (dir !== "." && !(await this.app.vault.adapter.exists(dir))) await this.app.vault.createFolder(dir);
@@ -621,7 +642,7 @@ module.exports = class CourseRecorder extends Plugin {
       if (anchored) {
         removeSource();
         this.afterAnchored(rec, img, f);
-        new Notice(`📷 AnnotateScreen 截圖已放進逐字稿 ${fmtTime(sec)}`, 4000);
+        new Notice(T(`📷 AnnotateScreen 截圖已放進逐字稿 ${fmtTime(sec)}`, `📷 AnnotateScreen screenshot added to the transcript at ${fmtTime(sec)}`), 4000);
         return;
       }
     }
@@ -637,7 +658,7 @@ module.exports = class CourseRecorder extends Plugin {
       await this.app.vault.process(note, (t) => `${t.replace(/\n*$/, "")}\n\n${link}\n`);
     }
     removeSource();
-    new Notice(`📷 AnnotateScreen 截圖已放進「${note.basename}」`, 4000);
+    new Notice(T(`📷 AnnotateScreen 截圖已放進「${note.basename}」`, `📷 AnnotateScreen screenshot added to "${note.basename}"`), 4000);
   }
 
   // ---------- 停止 ----------
@@ -645,7 +666,7 @@ module.exports = class CourseRecorder extends Plugin {
     const rec = this.recording;
     if (!this.proc || !rec || rec.stopping) return;
     rec.stopping = true;
-    new Notice("錄音筆記：存檔中…（等最後一段逐字稿，最多 30 秒）");
+    new Notice(T("錄音筆記：存檔中…（等最後一段逐字稿，最多 30 秒）", "Meeting Recorder: saving… (waiting for the last transcript lines, up to 30 seconds)"));
     this.proc.kill("SIGINT");
     // 錄音程式自己最多等 30 秒；45 秒還沒結束就強制結束（錄音檔在收尾的第一步就已經寫好）
     const proc = this.proc;
@@ -668,24 +689,24 @@ module.exports = class CourseRecorder extends Plugin {
         const lines = t.split("\n");
         const { s, e, h } = this.locate(lines, rec);
         if (s >= 0 && e >= 0) lines.splice(s, e - s + 1);
-        if (h >= 0) lines[h] = `${HEADING}${rec.label}（沒有收到任何聲音）`;
+        if (h >= 0) lines[h] = `${HEADING}${rec.label}${T("（沒有收到任何聲音）", " (no audio received)")}`;
         return lines.join("\n");
       });
       const hasVideo = rec.video?.path && fs.existsSync(rec.video.path);
       new Notice(hasVideo
-        ? `錄音筆記：一秒都沒收到聲音，錄音沒有存檔。\n畫面有錄到（沒有聲音）：下載／螢幕錄影／${path.basename(rec.video.path)}`
-        : "錄音筆記：一秒都沒收到聲音，沒有存檔", 20000);
+        ? T(`錄音筆記：一秒都沒收到聲音，錄音沒有存檔。\n畫面有錄到（沒有聲音）：下載／螢幕錄影／${path.basename(rec.video.path)}`, `Meeting Recorder: no audio was received, so nothing was saved.\nThe video was recorded (without sound): Downloads/Screen Recordings/${path.basename(rec.video.path)}`)
+        : T("錄音筆記：一秒都沒收到聲音，沒有存檔", "Meeting Recorder: no audio was received, so nothing was saved"), 20000);
       return;
     }
     const abs = path.join(this.app.vault.adapter.getBasePath(), rec.rel);
     if (!rec.saved && !(fs.existsSync(abs) && fs.statSync(abs).size > 4096)) {
       this.saveSession(rec, { state: "failed" });
       inFlight.delete(rec.id);
-      await this.setHeading(rec, "（存檔可能失敗）");
-      new Notice(`錄音筆記：存檔可能失敗（結束碼 ${code}）。暫存的聲音檔留在 ${rec.tmpdir}\n${rec.err().trim().slice(-400)}`, 30000);
+      await this.setHeading(rec, T("（存檔可能失敗）", " (saving may have failed)"));
+      new Notice(T(`錄音筆記：存檔可能失敗（結束碼 ${code}）。暫存的聲音檔留在 ${rec.tmpdir}\n${rec.err().trim().slice(-400)}`, `Meeting Recorder: saving may have failed (exit code ${code}). Temporary audio files are kept in ${rec.tmpdir}\n${rec.err().trim().slice(-400)}`), 30000);
       return;
     }
-    new Notice(`■ 錄音筆記已存檔，逐字稿精修中…\n${summary}`, 8000);
+    new Notice(T(`■ 錄音筆記已存檔，逐字稿精修中…\n${summary}`, `■ Meeting Recorder: saved. Refining the transcript…\n${summary}`), 8000);
     await this.afterSaved(rec);
   }
 
@@ -698,7 +719,7 @@ module.exports = class CourseRecorder extends Plugin {
       console.error("course-recorder afterSaved", e);
       inFlight.delete(rec.id);
       this.saveSession(rec, { state: "failed" });
-      new Notice(`錄音筆記：錄音檔已存好，但沒能寫進筆記（${e}）。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」`, 30000);
+      new Notice(T(`錄音筆記：錄音檔已存好，但沒能寫進筆記（${e}）。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」`, `Meeting Recorder: the audio file is saved but could not be written into the note (${e}).\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"`), 30000);
     }
   }
 
@@ -711,14 +732,14 @@ module.exports = class CourseRecorder extends Plugin {
       if (!(file instanceof TFile)) await new Promise((r) => setTimeout(r, 200));
     }
     await this.ensureNote(rec);
-    const embed = file instanceof TFile ? "!" + this.app.fileManager.generateMarkdownLink(file, rec.noteFile.path) : `（錄音檔：${rec.rel}）`;
+    const embed = file instanceof TFile ? "!" + this.app.fileManager.generateMarkdownLink(file, rec.noteFile.path) : T(`（錄音檔：${rec.rel}）`, `(audio file: ${rec.rel})`);
     const canRefine = fs.existsSync(path.join(rec.tmpdir, "course.wav"));
     let videoLine = null;
     if (rec.video?.path && fs.existsSync(rec.video.path)) {
       const off = Number.isFinite(rec.video.offset) ? rec.video.offset : 0;
-      videoLine = `🎬 [錄影：${path.basename(rec.video.path)}](file://${encodeURI(rec.video.path)}) %%video-offset ${off.toFixed(2)}%%`;
+      videoLine = `🎬 [${T("錄影：", "Video: ")}${path.basename(rec.video.path)}](file://${encodeURI(rec.video.path)}) %%video-offset ${off.toFixed(2)}%%`;
     }
-    await this.setHeading(rec, canRefine ? "（逐字稿 whisper 精修中…）" : "", [embed, videoLine]);
+    await this.setHeading(rec, canRefine ? T("（逐字稿 whisper 精修中…）", " (refining transcript with whisper…)") : "", [embed, videoLine]);
     if (!canRefine) { inFlight.delete(rec.id); return; }
     this.refineChain = this.refineChain
       .then(() => this.runRefine(rec))
@@ -743,7 +764,7 @@ module.exports = class CourseRecorder extends Plugin {
       this.saveSession(rec, { refinePid: p.pid });
       let out = "", err = "";
       // 正常速度約是錄音長度的 1/30；給「10 分鐘＋錄音長度」還沒跑完就當作卡住
-      const timer = setTimeout(() => { err += "\n逾時，已中止"; p.kill("SIGKILL"); }, (600 + seconds) * 1000);
+      const timer = setTimeout(() => { err += T("\n逾時，已中止", "\ntimed out, stopped"); p.kill("SIGKILL"); }, (600 + seconds) * 1000);
       p.stdout.on("data", (d) => (out += d));
       p.stderr.on("data", (d) => (err += d));
       p.on("error", (e) => { clearTimeout(timer); resolve({ segs: null, err: String(e) }); });
@@ -757,8 +778,8 @@ module.exports = class CourseRecorder extends Plugin {
 
     if (!result.segs) {
       this.saveSession(rec, { state: "failed", refinePid: null });
-      await this.setHeading(rec, "（whisper 精修失敗，以下是即時逐字稿）");
-      new Notice(`錄音筆記：whisper 精修失敗，保留即時逐字稿。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${result.err.trim().slice(-300)}`, 30000);
+      await this.setHeading(rec, T("（whisper 精修失敗，以下是即時逐字稿）", " (whisper refinement failed; showing the live transcript)"));
+      new Notice(T(`錄音筆記：whisper 精修失敗，保留即時逐字稿。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${result.err.trim().slice(-300)}`, `Meeting Recorder: whisper refinement failed; the live transcript is kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${result.err.trim().slice(-300)}`), 30000);
       return;
     }
     let keptImages = 0, keptLines = 0;
@@ -775,10 +796,10 @@ module.exports = class CourseRecorder extends Plugin {
         ...images.map((i) => ({ start: i.start, text: imageLines(i) })),
         ...rec.slides.map((i) => ({ start: i.start, text: imageLines(i) })),
       ].sort((a, b) => a.start - b.start);
-      const body = items.length ? items.flatMap((i) => i.text.split("\n")) : ["（沒有辨識到內容）"];
+      const body = items.length ? items.flatMap((i) => i.text.split("\n")) : [T("（沒有辨識到內容）", "(nothing was recognized)")];
       if (!hasBlock) {
         // 標記被刪掉了：不猜位置，整份加在文末
-        return `${t.replace(/\n*$/, "")}\n\n${HEADING}${rec.label}（逐字稿）\n${body.join("\n")}\n`;
+        return `${t.replace(/\n*$/, "")}\n\n${HEADING}${rec.label}${T("（逐字稿）", " (transcript)")}\n${body.join("\n")}\n`;
       }
       // 使用者在逐字稿區塊裡自己寫的內容要留下來，放在逐字稿後面
       const mine = [];
@@ -797,13 +818,13 @@ module.exports = class CourseRecorder extends Plugin {
     if (!written) {
       // 筆記沒寫成功：暫存留著，不能說完成
       this.saveSession(rec, { state: "failed", refinePid: null });
-      new Notice(`錄音筆記：精修好的逐字稿寫不進筆記，暫存先留著。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${rec.lastEditError || ""}`, 30000);
+      new Notice(T(`錄音筆記：精修好的逐字稿寫不進筆記，暫存先留著。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${rec.lastEditError || ""}`, `Meeting Recorder: the refined transcript could not be written into the note; temporary files are kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${rec.lastEditError || ""}`), 30000);
       return;
     }
     rec.state = "done";
     fs.rmSync(rec.tmpdir, { recursive: true, force: true });
-    const extra = [rec.slides.length ? `投影片 ${rec.slides.length} 頁` : "", keptImages ? `截圖 ${keptImages} 張` : "", keptLines ? `保留你寫的 ${keptLines} 行` : ""].filter(Boolean).join("、");
-    new Notice(`✓ 錄音筆記：逐字稿已換成 whisper 精修版（${result.segs.length} 段${extra ? "、" + extra : ""}）`, 8000);
+    const extra = [rec.slides.length ? T(`投影片 ${rec.slides.length} 頁`, `${rec.slides.length} slides`) : "", keptImages ? T(`截圖 ${keptImages} 張`, `${keptImages} screenshots`) : "", keptLines ? T(`保留你寫的 ${keptLines} 行`, `kept ${keptLines} lines you wrote`) : ""].filter(Boolean).join(T("、", ", "));
+    new Notice(T(`✓ 錄音筆記：逐字稿已換成 whisper 精修版（${result.segs.length} 段${extra ? "、" + extra : ""}）`, `✓ Meeting Recorder: transcript replaced with the whisper version (${result.segs.length} segments${extra ? ", " + extra : ""})`), 8000);
   }
 
   // ---------- 錄影後處理：聲音合進影片、偵測投影片換頁並截圖、辨識文字 ----------
@@ -814,7 +835,7 @@ module.exports = class CourseRecorder extends Plugin {
     const audioAbs = path.join(this.app.vault.adapter.getBasePath(), rec.rel);
     const outdir = path.join(rec.tmpdir, "slides");
     const offset = Number.isFinite(v.offset) ? v.offset : 0;
-    new Notice("錄音筆記：處理錄影中（合進聲音、擷取投影片）…", 6000);
+    new Notice(T("錄音筆記：處理錄影中（合進聲音、擷取投影片）…", "Meeting Recorder: processing the video (adding audio, capturing slides)…"), 6000);
     const res = await new Promise((resolve) => {
       execFile("/usr/bin/python3", ["-I", VIDEO_POST, v.path, audioAbs, outdir, String(offset)],
         { timeout: 20 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 }, (err, out, errOut) => {
@@ -823,14 +844,14 @@ module.exports = class CourseRecorder extends Plugin {
         });
     });
     if (res.error) {
-      new Notice(`⚠️ 錄影後處理失敗（錄音和逐字稿照常）：${res.error}`, 15000);
+      new Notice(T(`⚠️ 錄影後處理失敗（錄音和逐字稿照常）：${res.error}`, `⚠️ Video post-processing failed (audio and transcript are fine): ${res.error}`), 15000);
       return;
     }
     if (res.muxed === false) {
-      new Notice("⚠️ 錄音沒有合進錄影檔，那支影片沒有聲音（錄音檔本身在筆記裡，不受影響）", 20000);
+      new Notice(T("⚠️ 錄音沒有合進錄影檔，那支影片沒有聲音（錄音檔本身在筆記裡，不受影響）", "⚠️ Audio was not merged into the video, so the video has no sound (the audio file in your note is fine)"), 20000);
     }
     if (res.truncated) {
-      new Notice(`⚠️ 投影片超過 ${res.slides.length} 頁，後面的沒有截圖（錄影檔裡還看得到）`, 20000);
+      new Notice(T(`⚠️ 投影片超過 ${res.slides.length} 頁，後面的沒有截圖（錄影檔裡還看得到）`, `⚠️ More than ${res.slides.length} slides; later ones were not captured (they are still in the video)`), 20000);
     }
     // 截圖存進 vault（錄影檔之後會被刪，投影片要留下來）；文字辨識同時跑 3 張
     const made = await Promise.all((res.slides || []).map(async (sl, n) => {
@@ -872,15 +893,15 @@ module.exports = class CourseRecorder extends Plugin {
                     video: s.video || null, slides: s.slides || [], slidesDone: !!s.slidesDone, err: () => "" };
       inFlight.add(rec.id);
       this.saveSession(rec);
-      new Notice(`錄音筆記：${s.label} 的錄音上次沒有做完，現在補做逐字稿精修`, 10000);
+      new Notice(T(`錄音筆記：${s.label} 的錄音上次沒有做完，現在補做逐字稿精修`, `Meeting Recorder: the recording from ${s.label} was not finished last time; refining its transcript now`), 10000);
       await this.afterSaved(rec);
     }
-    if (manual && !found) new Notice(stillRunning ? "錄音筆記：還有錄音正在收尾，等它結束再試" : "錄音筆記：沒有需要補做的錄音");
+    if (manual && !found) new Notice(stillRunning ? T("錄音筆記：還有錄音正在收尾，等它結束再試", "Meeting Recorder: a recording is still finishing; try again when it is done") : T("錄音筆記：沒有需要補做的錄音", "Meeting Recorder: nothing to finish"));
     // 啟動時上一場的錄音程式還在收尾（最長 30 秒）：過一下再查，最多查 5 次
     if (!manual && stillRunning && round < 5) setTimeout(() => this.recoverOrphans(false, round + 1), 30000);
     // 補做過一次還是沒完成的：暫存不會自己消失（每小時錄音約 230 MB），提醒一次
     if (!manual && round === 0 && leftover) {
-      new Notice(`錄音筆記：有 ${leftover} 場錄音的逐字稿精修沒完成，暫存佔 ${Math.round(leftoverBytes / 1e6)} MB。\n重試：命令面板 →「補做沒完成的逐字稿精修」；不要了就刪掉 ~/.config/course-recorder/tmp/ 裡的資料夾`, 20000);
+      new Notice(T(`錄音筆記：有 ${leftover} 場錄音的逐字稿精修沒完成，暫存佔 ${Math.round(leftoverBytes / 1e6)} MB。\n重試：命令面板 →「補做沒完成的逐字稿精修」；不要了就刪掉 ~/.config/course-recorder/tmp/ 裡的資料夾`, `Meeting Recorder: ${leftover} recordings have unfinished transcript refinement, using ${Math.round(leftoverBytes / 1e6)} MB of temporary files.\nRetry: Command palette → "Finish incomplete transcript refinement"; or delete the folders in ~/.config/course-recorder/tmp/ if you do not need them`), 20000);
     }
   }
 
@@ -936,23 +957,23 @@ module.exports = class CourseRecorder extends Plugin {
         }
         break;
       }
-      if (lines[i].startsWith(HEADING)) break;
+      if (isHeading(lines[i])) break;
     }
     if (!this.player) {
       this.player = new Audio();
-      this.player.addEventListener("error", () => new Notice("錄音筆記：這個錄音檔播放不了（還在錄，或檔案損毀）", 8000));
+      this.player.addEventListener("error", () => new Notice(T("錄音筆記：這個錄音檔播放不了（還在錄，或檔案損毀）", "Meeting Recorder: this audio file cannot be played (still recording, or the file is damaged)"), 8000));
     }
     const same = this.player.dataset.file === audio.path;
     if (same && !this.player.paused && this.player.dataset.time === timeText) {
       this.player.pause();
-      new Notice("⏸ 停止播放");
+      new Notice(T("⏸ 停止播放", "⏸ Playback stopped"));
       return;
     }
     if (!same) { this.player.src = this.app.vault.getResourcePath(audio); this.player.dataset.file = audio.path; }
     this.player.dataset.time = timeText;
     const go = () => { this.player.currentTime = sec; this.player.play().catch(() => {}); };
     if (this.player.readyState >= 1) go(); else this.player.addEventListener("loadedmetadata", go, { once: true });
-    new Notice(`▶ 從 ${timeText} 播放（再點一次同一個時間停止）`, 4000);
+    new Notice(T(`▶ 從 ${timeText} 播放（再點一次同一個時間停止）`, `▶ Playing from ${timeText} (click the same time again to stop)`), 4000);
   }
 
   // QuickTime 打開錄影（已經開著就不重開）並跳到指定秒數
@@ -977,8 +998,8 @@ module.exports = class CourseRecorder extends Plugin {
     ];
     const args = script.flatMap((l) => ["-e", l]).concat([vpath, sec.toFixed(2)]);
     execFile("/usr/bin/osascript", args, { timeout: 20000 }, (err, _o, errOut) => {
-      if (err) new Notice(`錄音筆記：QuickTime 打不開錄影：${String(errOut || err).slice(-200)}\n第一次使用要允許 Obsidian 控制 QuickTime Player`, 15000);
+      if (err) new Notice(T(`錄音筆記：QuickTime 打不開錄影：${String(errOut || err).slice(-200)}\n第一次使用要允許 Obsidian 控制 QuickTime Player`, `Meeting Recorder: QuickTime could not open the video: ${String(errOut || err).slice(-200)}\nOn first use, allow Obsidian to control QuickTime Player`), 15000);
     });
-    new Notice(`▶ 用 QuickTime 從 ${label} 播放錄影`, 4000);
+    new Notice(T(`▶ 用 QuickTime 從 ${label} 播放錄影`, `▶ Playing the video in QuickTime from ${label}`), 4000);
   }
 };

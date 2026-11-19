@@ -111,24 +111,36 @@ if [[ -z $VAULT_DIR || ! -d $VAULT_DIR/.obsidian ]]; then
   fi
 fi
 if [[ -n $VAULT_DIR && -d $VAULT_DIR/.obsidian ]]; then
-  PLUG="$VAULT_DIR/.obsidian/plugins/course-recorder"
+  PLUG="$VAULT_DIR/.obsidian/plugins/meeting-recorder"
+  OLD_PLUG="$VAULT_DIR/.obsidian/plugins/course-recorder"   # 0.11.0 以前的外掛代號（2026-11-19 改名，準備上架 Obsidian 市集）
   mkdir -p "$VAULT_DIR/.obsidian/plugins"
+  OLD_DATA=""
+  if [[ -d $OLD_PLUG ]]; then
+    mkdir -p "$CONFIG_DIR/backup"
+    mv "$OLD_PLUG" "$CONFIG_DIR/backup/plugin-course-recorder.$STAMP" && DONE+=("舊版外掛 course-recorder 已移到 $CONFIG_DIR/backup/plugin-course-recorder.$STAMP")
+    [[ -f $CONFIG_DIR/backup/plugin-course-recorder.$STAMP/data.json ]] && OLD_DATA="$CONFIG_DIR/backup/plugin-course-recorder.$STAMP/data.json"
+  fi
   if [[ -d $PLUG ]]; then
     mkdir -p "$CONFIG_DIR/backup/plugin.$STAMP" && cp -p "$PLUG"/* "$CONFIG_DIR/backup/plugin.$STAMP/" 2>/dev/null
     [[ -f $PLUG/data.json ]] && cp -p "$PLUG/data.json" "$CONFIG_DIR/backup/plugin.$STAMP.data.json"
   fi
-  mkdir -p "$PLUG" && cp "$PKG/obsidian-plugin/course-recorder/"{main.js,manifest.json,styles.css} "$PLUG/"
+  mkdir -p "$PLUG" && cp "$PKG/obsidian-plugin/meeting-recorder/"{main.js,manifest.json,styles.css} "$PLUG/"
+  if [[ -n $OLD_DATA && ! -f $PLUG/data.json ]]; then cp -p "$OLD_DATA" "$PLUG/data.json" && DONE+=("舊版外掛的設定已帶到新版"); fi
   # 加進啟用清單（用 JSON 解析，不用文字取代）
   /usr/bin/python3 -I - "$VAULT_DIR/.obsidian/community-plugins.json" <<'PY' && DONE+=("Obsidian 外掛 → $PLUG") || WARN+=("外掛檔案放好了，但沒能加進啟用清單：請到 Obsidian 設定 → 第三方外掛，打開「錄音筆記（本機）」")
 import json, os, sys
 p = sys.argv[1]
 ids = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else []
-if "course-recorder" not in ids:
-    ids.append("course-recorder")
+old = list(ids)
+ids = ["meeting-recorder" if i == "course-recorder" else i for i in ids]   # 舊代號原地換掉
+if "meeting-recorder" not in ids:
+    ids.append("meeting-recorder")
+ids = list(dict.fromkeys(ids))
+if ids != old:
     json.dump(ids, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 else
-  WARN+=("沒有安裝 Obsidian 外掛（找不到 vault）。手動做法：把這個 repo 的 obsidian-plugin/course-recorder 複製到 <vault>/.obsidian/plugins/，再到 Obsidian 設定啟用")
+  WARN+=("沒有安裝 Obsidian 外掛（找不到 vault）。手動做法：把這個 repo 的 obsidian-plugin/meeting-recorder 複製到 <vault>/.obsidian/plugins/，再到 Obsidian 設定啟用")
 fi
 
 # ---------- 6. 結果 ----------

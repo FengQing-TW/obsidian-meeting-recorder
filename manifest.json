@@ -1,0 +1,9 @@
+{
+  "id": "meeting-recorder",
+  "name": "Meeting Recorder",
+  "version": "0.12.0",
+  "minAppVersion": "1.5.0",
+  "description": "Record system audio and your microphone on macOS with a live transcript, local whisper refinement, and slides placed on the transcript timeline. Transcription currently supports Mandarin Chinese.",
+  "author": "FENGQING TECHNOLOGY",
+  "isDesktopOnly": true
+}

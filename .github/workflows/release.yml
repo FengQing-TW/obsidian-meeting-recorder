@@ -1,0 +1,38 @@
+# Publish an Obsidian plugin release when a version tag (e.g. 0.12.0, no "v") is pushed.
+# The Obsidian community directory installs main.js, manifest.json and styles.css from the
+# GitHub release whose tag equals the version in manifest.json.
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches manifest.json
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version=$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')
+          plugin=$(python3 -c 'import json; print(json.load(open("obsidian-plugin/meeting-recorder/manifest.json"))["version"])')
+          echo "tag=${tag} manifest=${version} plugin=${plugin}"
+          [ "${tag}" = "${version}" ] && [ "${tag}" = "${plugin}" ] || { echo "Tag must equal the manifest version"; exit 1; }
+          cmp manifest.json obsidian-plugin/meeting-recorder/manifest.json
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Meeting Recorder ${GITHUB_REF_NAME}. Before using the plugin, run install.sh from this repository once (see README)." \
+            obsidian-plugin/meeting-recorder/main.js \
+            manifest.json \
+            obsidian-plugin/meeting-recorder/styles.css

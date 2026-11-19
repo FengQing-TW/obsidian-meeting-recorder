@@ -1,9 +1,0 @@
-{
-  "id": "course-recorder",
-  "name": "錄音筆記（本機）",
-  "version": "0.11.0",
-  "minAppVersion": "1.5.0",
-  "description": "一鍵錄「電腦播放的聲音＋麥克風」（可同時錄某個 App 的畫面），即時逐字稿、截圖／投影片對時間並辨識文字、錄完 whisper 精修、點時間跳播。",
-  "author": "FENGQING TECHNOLOGY",
-  "isDesktopOnly": true
-}
