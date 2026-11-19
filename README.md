@@ -11,7 +11,7 @@ Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese. **[English s
 
 - 只能在 **Apple Silicon 的 Mac** 上用，macOS 26 以上，Obsidian 桌面版。
 - 逐字稿目前**只支援中文**。
-- 除了裝外掛，還要在終端機**執行一次安裝腳本**，過程會下載 1.5 GB 的語音模型。
+- 除了裝外掛，還要在終端機**執行一次安裝腳本**，過程會下載 1.6 GB 的語音模型。
 
 ## 它幫你做什麼
 
@@ -57,7 +57,7 @@ Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese. **[English s
 - Obsidian 桌面版
 - Command Line Tools（在終端機執行 `xcode-select --install`）
 - [Homebrew](https://brew.sh)。安裝腳本會用它裝 `whisper-cpp`、`opencc`、`ffmpeg`，裝之前會先問你
-- 約 1.5 GB 的空間放 whisper 模型 `ggml-large-v3-turbo.bin`，下載之前也會先問你
+- 約 1.6 GB 的空間放 whisper 模型 `ggml-large-v3-turbo.bin`，下載之前也會先問你
 
 ### 2. 執行安裝腳本
 
@@ -103,7 +103,7 @@ zsh install.sh
 ## 它會動到哪些地方
 
 - **vault 以外的檔案：** 外掛會執行放在 `~/.config/course-recorder/` 的錄音程式和腳本，逐字稿完成前的暫存錄音也放在這裡。畫面錄影存到 `~/Downloads/螢幕錄影/`（介面是英文時為 `~/Downloads/Screen Recordings/`）。外掛會留意 `~/Downloads` 裡 AnnotateScreen 的截圖，把它收進筆記。
-- **網路：** 外掛和錄音程式不發出網路請求。語音與文字辨識用 macOS 內建功能和本機的 whisper 模型。只有 `install.sh` 會連網路，而且是在你同意之後：用 Homebrew 裝套件、從 Hugging Face 下載 1.5 GB 的 whisper 模型。macOS 第一次使用語音辨識時，可能會自己下載系統的辨識資料。
+- **網路：** 外掛和錄音程式不發出網路請求。語音與文字辨識用 macOS 內建功能和本機的 whisper 模型。只有 `install.sh` 會連網路，而且是在你同意之後：用 Homebrew 裝套件、從 Hugging Face 下載 1.6 GB 的 whisper 模型。macOS 第一次使用語音辨識時，可能會自己下載系統的辨識資料。
 - **帳號與費用：** 不用註冊帳號，不收費，沒有廣告，不蒐集使用資料。
 - **介面語言：** 預設跟著 Obsidian。要固定語言，在外掛的 `data.json` 加上 `"lang": "zh"` 或 `"lang": "en"`。
 
@@ -139,7 +139,7 @@ MIT，見 [LICENSE](LICENSE)。相依的 whisper.cpp、OpenCC、ffmpeg 由你自
 **Disclosures (as required by the Obsidian developer policies)**
 
 - **Files outside your vault:** the plugin runs the recorder and scripts in `~/.config/course-recorder/`, keeps temporary audio there until a transcript is finished, saves screen recordings to `~/Downloads/Screen Recordings/` (or `~/Downloads/螢幕錄影/` with the Chinese interface), and watches `~/Downloads` for AnnotateScreen screenshots to import.
-- **Network use:** the plugin and the recorder make no network requests. Speech and text recognition use the macOS built-in recognizers and a local whisper model. Only `install.sh` uses the network, and only after you confirm: Homebrew packages and the 1.5 GB whisper model from Hugging Face. macOS may download its own speech recognition assets the first time.
+- **Network use:** the plugin and the recorder make no network requests. Speech and text recognition use the macOS built-in recognizers and a local whisper model. Only `install.sh` uses the network, and only after you confirm: Homebrew packages and the 1.6 GB whisper model from Hugging Face. macOS may download its own speech recognition assets the first time.
 - **No account, no payment, no ads, no telemetry.** The plugin is free. If it saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.com/fengqingtech).
 
 **Settings:** to force the interface language, add `"lang": "en"` or `"lang": "zh"` to the plugin's `data.json` (default `"auto"` follows Obsidian).

@@ -90,10 +90,10 @@ MODEL=ggml-large-v3-turbo.bin
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL"
 if [[ -s $MODEL_DIR/$MODEL ]]; then
   say "   已經有了"
-elif [[ ${ASSUME_YES:-0} != 1 ]] && ask "   沒有模型。要現在下載嗎？（1.5 GB，來源：whisper.cpp 在 Hugging Face 的官方模型庫）"; then
+elif [[ ${ASSUME_YES:-0} != 1 ]] && ask "   沒有模型。要現在下載嗎？（1.6 GB，來源：whisper.cpp 在 Hugging Face 的官方模型庫）"; then
   mkdir -p "$MODEL_DIR"
   if curl -L --fail --progress-bar -o "$MODEL_DIR/$MODEL.part" "$MODEL_URL"; then
-    mv "$MODEL_DIR/$MODEL.part" "$MODEL_DIR/$MODEL" && DONE+=("whisper 模型（1.5 GB）")
+    mv "$MODEL_DIR/$MODEL.part" "$MODEL_DIR/$MODEL" && DONE+=("whisper 模型（1.6 GB）")
   else
     rm -f "$MODEL_DIR/$MODEL.part"; WARN+=("模型下載失敗。手動下載 $MODEL_URL 放到 $MODEL_DIR/")
   fi
