@@ -5,7 +5,7 @@
 // 4. 點逐字稿裡的時間（`12:34`）就從那裡播放錄音
 // 6. 也可以同時錄某個 App 的畫面（macOS 內建選擇視窗）：影片存到「下載／螢幕錄影」，錄完合進聲音、
 //    自動偵測投影片換頁並截圖（video_post.py），截圖放進逐字稿；點時間會用 QuickTime 跳到影片的那個畫面
-// 7. AnnotateScreen（螢幕標註工具，github.com/chukuolung/annotate-screen）存到「下載」的截圖 AnnotateScreen_*.png 會自動搬進目前的筆記；
+// 7. AnnotateScreen（螢幕標註工具，github.com/FengQing-TW/annotate-screen）存到「下載」的截圖 AnnotateScreen_*.png 會自動搬進目前的筆記；
 //    錄音中則放進逐字稿、對上錄音時間、辨識文字
 // 5. 每場錄音的狀態存在 ~/.config/course-recorder/tmp/<id>/session.json；Obsidian 中途關閉或當掉，
 //    下次啟動會自動把沒做完的（插入錄音檔、whisper 精修）補完

@@ -47,7 +47,7 @@ Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese; the English 
 ## 安裝
 
 ```zsh
-git clone https://github.com/chukuolung/obsidian-meeting-recorder.git
+git clone https://github.com/FengQing-TW/obsidian-meeting-recorder.git
 cd obsidian-meeting-recorder
 zsh install.sh
 ```
@@ -68,7 +68,7 @@ zsh install.sh
 
 ## 搭配 AnnotateScreen
 
-[AnnotateScreen](https://github.com/chukuolung/annotate-screen) 是另一個螢幕標註工具。兩個一起用時，它的截圖會自動收進目前的筆記，錄音中則排進逐字稿對應的時間。
+[AnnotateScreen](https://github.com/FengQing-TW/annotate-screen) 是另一個螢幕標註工具。兩個一起用時，它的截圖會自動收進目前的筆記，錄音中則排進逐字稿對應的時間。
 
 ## 支援
 

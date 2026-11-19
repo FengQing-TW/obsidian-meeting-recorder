@@ -153,7 +153,7 @@ cat <<TXT
 1. 重新啟動 Obsidian；左側功能列會出現 🎤。第一次按錄音時依序允許 Obsidian：
    麥克風、系統錄音（螢幕與系統錄音）、語音辨識；要錄 App 畫面再允許螢幕錄製（允許後要重開 Obsidian）
 2. 第一次用即時字幕，macOS 可能要下載中文語音辨識模型（需要網路，約幾百 MB）
-3. 搭配 AnnotateScreen（選用，github.com/chukuolung/annotate-screen）時，截圖要自動收進筆記：
+3. 搭配 AnnotateScreen（選用，github.com/FengQing-TW/annotate-screen）時，截圖要自動收進筆記：
    第一次會問 Obsidian 能不能取用「下載」資料夾，請允許
 說明文件：docs/使用說明.md
 提醒：這個工具會錄下所有人的聲音。用在會議時，錄音前請先告知對方。
