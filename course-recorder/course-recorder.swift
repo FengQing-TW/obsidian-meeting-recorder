@@ -2,7 +2,7 @@
 // 原理：macOS 14.4+ 的 Core Audio process tap 抓系統播出的聲音（不管各 App 選哪個喇叭），
 //       跟預設麥克風一起放進一個私有聚集裝置，同一個時脈讀出來、混音、寫檔。
 // 用法：course-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>]   收到 SIGINT／SIGTERM 就收尾存檔
-//         --video <輸出檔.mp4>：同時錄螢幕。啟動後跳出 macOS 的選擇視窗，選要錄的 App 或視窗（只錄它，其他畫面不會入鏡）；
+//         --video <輸出檔.mp4>：同時錄螢幕。啟動後跳出 macOS 的選擇視窗，選要錄的 App 或視窗（只錄它，其他畫面不會入鏡；AnnotateScreen 的標註層例外，會一起錄）；
 //                       每秒 5 格、長邊縮到 1920×1080 以內、HEVC。錄影比錄音晚開始，時間差用 VIDEO_OFFSET 告訴外掛
 //         --transcribe：同時即時辨識（Apple SpeechTranscriber，zh-TW），對方＝電腦聲音、我＝麥克風，
 //                       每句定稿就印一行「SEG<TAB>誰<TAB>開始秒<TAB>結束秒<TAB>文字」；
@@ -118,6 +118,32 @@ if args.count >= 2 && args[1] == "--selftest-limiter" {
 if args.count >= 2 && args[1] == "--list-processes" {
     for p in audioProcesses() { print("\(p.pid)\t\(p.bundle)") }
     exit(0)
+}
+// 測試用：course-recorder --selftest-video <輸出檔.mp4> <秒數> window:<視窗編號>|app:<程式 pid>
+// 不錄音、不跳系統選擇視窗，直接把指定的視窗或 App 當成「選到的範圍」錄影，用來驗證標註層有沒有一起錄到
+if args.count >= 5 && args[1] == "--selftest-video" {
+    let testURL = URL(fileURLWithPath: args[2])
+    let secs = Double(args[3]) ?? 5
+    let target = args[4].split(separator: ":").map(String.init)
+    let testApp = NSApplication.shared
+    testApp.setActivationPolicy(.accessory)
+    let rec = VideoRecorder(url: testURL)
+    VideoRecorder.shareableContent { content in
+        guard let c = content else { fail("抓不到視窗清單（螢幕錄製權限？）") }
+        guard target.count == 2, let n = Int(target[1]) else { fail("目標要寫 window:<編號> 或 app:<pid>") }
+        let filter: SCContentFilter
+        if target[0] == "window", let w = c.windows.first(where: { Int($0.windowID) == n }) {
+            filter = SCContentFilter(desktopIndependentWindow: w)
+        } else if target[0] == "app", let a = c.applications.first(where: { Int($0.processID) == n }) {
+            let frames = c.windows.filter { $0.isOnScreen && $0.owningApplication?.processID == a.processID }.map { $0.frame }
+            guard let d = AnnotationLayer.bestDisplay(for: frames, c.displays) else { fail("找不到螢幕") }
+            filter = SCContentFilter(display: d, including: [a], exceptingWindows: [])
+        } else { fail("找不到 \(args[4])") }
+        log("測試：選到的範圍 style=\(filter.style.rawValue)")
+        rec.startCapture(filter)
+        DispatchQueue.main.asyncAfter(deadline: .now() + secs) { rec.stop { exit(0) } }
+    }
+    testApp.run()
 }
 guard args.count >= 2 else { fail("用法：course-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>] | --list-processes") }
 let outURL = URL(fileURLWithPath: args[1])
@@ -500,6 +526,62 @@ emit(live.isEmpty ? "STARTED" : "STARTED LIVE")  // 給外掛：錄音程式已�
 // ---------- 7. 螢幕錄影（--video 才啟用） ----------
 // 用 macOS 的 ScreenCaptureKit：系統選擇視窗（SCContentSharingPicker）選 App／視窗，SCRecordingOutput 直接寫 mp4。
 // 只錄選到的 App；被其他視窗擋住也錄得到；通知、其他 App 不會入鏡。聲音不在這裡錄（錄音那邊已經有），錄完由外掛合進影片。
+// 例外：AnnotateScreen（螢幕標註工具）有開時，它的標註層會一起錄進去（工具列、提示不錄），見 AnnotationLayer。
+
+// AnnotateScreen 的標註畫在它自己的透明視窗上，是另一個 App，只錄選到的 App 時會被濾掉。
+// 錄影時把這些視窗加進錄影範圍：選 App → 錄「那個 App＋標註層」；選視窗 → 錄「那個視窗＋標註層」並裁到視窗範圍。
+enum AnnotationLayer {
+    static let bundleIDs: Set<String> = ["tw.fengqing.AnnotateScreen"]   // 舊版的 bundle ID 不同，靠程式名稱認
+    // AnnotateScreen 的視窗層級（screenSaver＝1000）：標註層 +0、聚光燈 +1、放大鏡 +2 要錄；
+    // 工具列 +3、提示 +4、範圍選取 +5、對話框 +6 不錄
+    static let recordedLayers = 1000...1002
+
+    static func isAnnotateScreen(_ a: SCRunningApplication?) -> Bool {
+        guard let a else { return false }
+        return bundleIDs.contains(a.bundleIdentifier) || a.applicationName == "AnnotateScreen"
+    }
+
+    // 回傳（錄影範圍、要裁切的區域〔螢幕內座標，點〕、內容簽章）。nil＝AnnotateScreen 沒開或認不出選了什麼，照原本選的範圍錄。
+    static func combine(_ picked: SCContentFilter, _ content: SCShareableContent) -> (SCContentFilter, CGRect?, String)? {
+        let annotWindows = content.windows.filter { isAnnotateScreen($0.owningApplication) }
+        let layers = annotWindows.filter { recordedLayers.contains($0.windowLayer) }
+        guard !layers.isEmpty else { return nil }
+        switch picked.style {
+        case .window:
+            guard let pid = picked.includedWindows.first?.windowID,
+                  let w = content.windows.first(where: { $0.windowID == pid }),
+                  let d = bestDisplay(for: [w.frame], content.displays) else { return nil }
+            let onDisplay = layers.filter { $0.frame.intersects(d.frame) }
+            let rect = w.frame.intersection(d.frame).offsetBy(dx: -d.frame.minX, dy: -d.frame.minY)
+            guard rect.width >= 2, rect.height >= 2 else { return nil }
+            let sig = "w\(d.displayID):\(([w] + onDisplay).map { $0.windowID }.sorted()):\(rect)"
+            return (SCContentFilter(display: d, including: [w] + onDisplay), rect, sig)
+        case .application, .display:   // 「螢幕＋指定 App」組出來的範圍，系統也標成 display
+            let pids = Set(picked.includedApplications.map { $0.processID })
+            let apps = content.applications.filter { pids.contains($0.processID) }
+            guard !apps.isEmpty else { return nil }
+            let pickedDisplay = picked.includedDisplays.first.flatMap { pd in content.displays.first { $0.displayID == pd.displayID } }
+            let appFrames = content.windows.filter { $0.isOnScreen && pids.contains($0.owningApplication?.processID ?? -1) }.map { $0.frame }
+            guard let d = pickedDisplay ?? bestDisplay(for: appFrames, content.displays) else { return nil }
+            let annotApps = content.applications.filter { isAnnotateScreen($0) }
+            let hidden = annotWindows.filter { !recordedLayers.contains($0.windowLayer) }   // 工具列、提示等
+            let sig = "a\(d.displayID):\((apps + annotApps).map { $0.processID }.sorted()):\(hidden.map { $0.windowID }.sorted())"
+            return (SCContentFilter(display: d, including: apps + annotApps, exceptingWindows: hidden), nil, sig)
+        default:
+            return nil
+        }
+    }
+
+    // 跟這些區域重疊面積最大的螢幕；都沒重疊就用主螢幕
+    static func bestDisplay(for frames: [CGRect], _ displays: [SCDisplay]) -> SCDisplay? {
+        func area(_ d: SCDisplay) -> CGFloat {
+            frames.reduce(0) { s, f in let i = f.intersection(d.frame); return s + (i.isNull ? 0 : i.width * i.height) }
+        }
+        if let best = displays.max(by: { area($0) < area($1) }), area(best) > 0 { return best }
+        return displays.first { $0.displayID == CGMainDisplayID() } ?? displays.first
+    }
+}
+
 final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDelegate, SCRecordingOutputDelegate, @unchecked Sendable {
     let url: URL
     var stream: SCStream?
@@ -507,8 +589,19 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
     var startNanos: UInt64 = 0
     var state = "picking"            // picking → starting → recording → stopped／cancelled／failed
     var onFinished: (() -> Void)?
+    var picked: SCContentFilter?     // 使用者在系統選擇視窗選的範圍
+    var config: SCStreamConfiguration?
+    var signature = ""               // 目前錄影範圍的內容簽章；變了才更新
+    var refreshTimer: DispatchSourceTimer?
 
     init(url: URL) { self.url = url }
+
+    // 抓目前畫面上的視窗清單（背景執行緒回呼，轉回主執行緒）
+    static func shareableContent(_ done: @escaping (SCShareableContent?) -> Void) {
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { c, _ in
+            DispatchQueue.main.async { done(c) }
+        }
+    }
 
     func present() {
         let picker = SCContentSharingPicker.shared
@@ -542,8 +635,9 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
 
     func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         DispatchQueue.main.async {
-            if let s = self.stream {   // 錄影中從選單列換了要錄的 App
-                s.updateContentFilter(filter) { _ in }
+            self.picked = filter
+            if self.stream != nil {   // 錄影中從選單列換了要錄的 App
+                self.refreshFilter()
                 return
             }
             guard self.state == "picking" else { return }
@@ -551,19 +645,37 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
         }
     }
 
+    // 先看 AnnotateScreen 有沒有開，決定實際錄影範圍再開始
     func startCapture(_ filter: SCContentFilter) {
-        let scale = Double(filter.pointPixelScale)
-        var w = Double(filter.contentRect.width) * scale, h = Double(filter.contentRect.height) * scale
+        picked = filter
+        state = "starting"
+        Self.shareableContent { content in
+            let combined = content.flatMap { AnnotationLayer.combine(filter, $0) }
+            self.beginCapture(picked: filter, combined: combined)
+        }
+    }
+
+    func beginCapture(picked filter: SCContentFilter, combined: (SCContentFilter, CGRect?, String)?) {
+        guard state == "starting" else { return }
+        let active = combined?.0 ?? filter
+        let crop = combined?.1
+        let scale = Double(active.pointPixelScale)
+        let size = crop?.size ?? active.contentRect.size
+        var w = Double(size.width) * scale, h = Double(size.height) * scale
         if w <= 0 || h <= 0 { w = 1920; h = 1080 }
         let k = min(1.0, 1920.0 / w, 1080.0 / h)
         let cfg = SCStreamConfiguration()
         cfg.width = max(2, Int(w * k) / 2 * 2)
         cfg.height = max(2, Int(h * k) / 2 * 2)
+        if let crop { cfg.sourceRect = crop }
         cfg.minimumFrameInterval = CMTime(value: 1, timescale: 5)   // 投影片為主：每秒 5 格
         cfg.showsCursor = true
         cfg.capturesAudio = false
         cfg.queueDepth = 6
-        let s = SCStream(filter: filter, configuration: cfg, delegate: self)
+        config = cfg
+        signature = combined?.2 ?? "picked"
+        if combined != nil { log("錄影：連同 AnnotateScreen 標註層一起錄") }
+        let s = SCStream(filter: active, configuration: cfg, delegate: self)
         let rc = SCRecordingOutputConfiguration()
         rc.outputURL = url
         rc.outputFileType = .mp4
@@ -576,8 +688,13 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
         }
         stream = s
         output = ro
-        state = "starting"
         log("錄影：\(cfg.width)×\(cfg.height)，每秒 5 格 → \(url.path)")
+        // 每 2 秒重看一次：AnnotateScreen 中途開關、被錄的視窗移動或換螢幕，錄影範圍跟著改
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 2, repeating: 2)
+        t.setEventHandler { [weak self] in self?.refreshFilter() }
+        t.resume()
+        refreshTimer = t
         s.startCapture { err in
             guard let err else { return }
             DispatchQueue.main.async {
@@ -620,7 +737,27 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
         }
     }
 
+    // 重新計算錄影範圍；跟現在不同才更新（輸出影片的尺寸不變）
+    func refreshFilter() {
+        guard let picked, stream != nil else { return }
+        Self.shareableContent { content in
+            guard let s = self.stream, let cfg = self.config else { return }
+            let combined = content.flatMap { AnnotationLayer.combine(picked, $0) }
+            let sig = combined?.2 ?? "picked"
+            guard sig != self.signature else { return }
+            self.signature = sig
+            cfg.sourceRect = combined?.1 ?? .zero   // .zero＝不裁切（系統預設值；設 .null 會讓錄影停止出畫格）
+            s.updateConfiguration(cfg) { _ in }
+            s.updateContentFilter(combined?.0 ?? picked) { err in
+                if let err { log("錄影範圍更新失敗：\(err)") }
+            }
+            log(combined == nil ? "錄影：只錄選到的範圍" : "錄影：連同 AnnotateScreen 標註層一起錄")
+        }
+    }
+
     private func done() {
+        refreshTimer?.cancel()
+        refreshTimer = nil
         if let f = onFinished { onFinished = nil; f() }
     }
 
@@ -629,6 +766,9 @@ final class VideoRecorder: NSObject, SCContentSharingPickerObserver, SCStreamDel
         let picker = SCContentSharingPicker.shared
         picker.isActive = false
         picker.remove(self)
+        refreshTimer?.cancel()
+        refreshTimer = nil
+        if stream == nil && state == "starting" { state = "stopped" }   // 還在決定錄影範圍就被停：不要再開始
         guard let s = stream, state == "recording" || state == "starting" else { completion(); return }
         onFinished = completion
         s.stopCapture { _ in }
