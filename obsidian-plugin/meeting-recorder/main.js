@@ -719,7 +719,7 @@ module.exports = class CourseRecorder extends Plugin {
       console.error("course-recorder afterSaved", e);
       inFlight.delete(rec.id);
       this.saveSession(rec, { state: "failed" });
-      new Notice(T(`錄音筆記：錄音檔已存好，但沒能寫進筆記（${e}）。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」`, `Meeting Recorder: the audio file is saved but could not be written into the note (${e}).\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"`), 30000);
+      new Notice(T(`錄音筆記：錄音檔已存好，但沒能寫進筆記（${e}）。\n要重試：命令面板 →「Meeting Recorder: 補做沒完成的逐字稿精修」`, `Meeting Recorder: the audio file is saved but could not be written into the note (${e}).\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"`), 30000);
     }
   }
 
@@ -779,7 +779,7 @@ module.exports = class CourseRecorder extends Plugin {
     if (!result.segs) {
       this.saveSession(rec, { state: "failed", refinePid: null });
       await this.setHeading(rec, T("（whisper 精修失敗，以下是即時逐字稿）", " (whisper refinement failed; showing the live transcript)"));
-      new Notice(T(`錄音筆記：whisper 精修失敗，保留即時逐字稿。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${result.err.trim().slice(-300)}`, `Meeting Recorder: whisper refinement failed; the live transcript is kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${result.err.trim().slice(-300)}`), 30000);
+      new Notice(T(`錄音筆記：whisper 精修失敗，保留即時逐字稿。\n要重試：命令面板 →「Meeting Recorder: 補做沒完成的逐字稿精修」\n${result.err.trim().slice(-300)}`, `Meeting Recorder: whisper refinement failed; the live transcript is kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${result.err.trim().slice(-300)}`), 30000);
       return;
     }
     let keptImages = 0, keptLines = 0;
@@ -818,7 +818,7 @@ module.exports = class CourseRecorder extends Plugin {
     if (!written) {
       // 筆記沒寫成功：暫存留著，不能說完成
       this.saveSession(rec, { state: "failed", refinePid: null });
-      new Notice(T(`錄音筆記：精修好的逐字稿寫不進筆記，暫存先留著。\n要重試：命令面板 →「錄音筆記（本機）: 補做沒完成的逐字稿精修」\n${rec.lastEditError || ""}`, `Meeting Recorder: the refined transcript could not be written into the note; temporary files are kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${rec.lastEditError || ""}`), 30000);
+      new Notice(T(`錄音筆記：精修好的逐字稿寫不進筆記，暫存先留著。\n要重試：命令面板 →「Meeting Recorder: 補做沒完成的逐字稿精修」\n${rec.lastEditError || ""}`, `Meeting Recorder: the refined transcript could not be written into the note; temporary files are kept.\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"\n${rec.lastEditError || ""}`), 30000);
       return;
     }
     rec.state = "done";

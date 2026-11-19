@@ -16,7 +16,7 @@ Apple Silicon, macOS 26+. Detailed docs are in Traditional Chinese; the English 
 
 - **Files outside your vault:** the plugin runs the recorder and scripts in `~/.config/course-recorder/`, keeps temporary audio there until a transcript is finished, saves screen recordings to `~/Downloads/Screen Recordings/` (or `~/Downloads/螢幕錄影/` with the Chinese interface), and watches `~/Downloads` for AnnotateScreen screenshots to import.
 - **Network use:** the plugin and the recorder make no network requests. Speech and text recognition use the macOS built-in recognizers and a local whisper model. Only `install.sh` uses the network, and only after you confirm: Homebrew packages and the 1.5 GB whisper model from Hugging Face. macOS may download its own speech recognition assets the first time.
-- **No account, no payment, no ads, no telemetry.**
+- **No account, no payment, no ads, no telemetry.** The plugin is free. If it saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.com/fengqingtech).
 
 **Settings:** to force the interface language, add `"lang": "en"` or `"lang": "zh"` to the plugin's `data.json` (default `"auto"` follows Obsidian).
 
@@ -73,6 +73,8 @@ zsh install.sh
 ## 支援
 
 這是自用工具，照現況提供，不保證回覆問題或修正。
+
+覺得好用的話，歡迎在 [Ko-fi](https://ko-fi.com/fengqingtech) 請我們喝杯咖啡，支持後續維護。
 
 ## 授權
 

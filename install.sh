@@ -127,7 +127,7 @@ if [[ -n $VAULT_DIR && -d $VAULT_DIR/.obsidian ]]; then
   mkdir -p "$PLUG" && cp "$PKG/obsidian-plugin/meeting-recorder/"{main.js,manifest.json,styles.css} "$PLUG/"
   if [[ -n $OLD_DATA && ! -f $PLUG/data.json ]]; then cp -p "$OLD_DATA" "$PLUG/data.json" && DONE+=("舊版外掛的設定已帶到新版"); fi
   # 加進啟用清單（用 JSON 解析，不用文字取代）
-  /usr/bin/python3 -I - "$VAULT_DIR/.obsidian/community-plugins.json" <<'PY' && DONE+=("Obsidian 外掛 → $PLUG") || WARN+=("外掛檔案放好了，但沒能加進啟用清單：請到 Obsidian 設定 → 第三方外掛，打開「錄音筆記（本機）」")
+  /usr/bin/python3 -I - "$VAULT_DIR/.obsidian/community-plugins.json" <<'PY' && DONE+=("Obsidian 外掛 → $PLUG") || WARN+=("外掛檔案放好了，但沒能加進啟用清單：請到 Obsidian 設定 → 第三方外掛，打開「Meeting Recorder」")
 import json, os, sys
 p = sys.argv[1]
 ids = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else []
