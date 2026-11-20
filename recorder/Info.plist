@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>local.course-recorder</string>
+	<string>tw.fengqing.meeting-recorder</string>
 	<key>CFBundleName</key>
-	<string>course-recorder</string>
+	<string>meeting-recorder</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>錄製電腦播出的聲音</string>
 	<key>NSMicrophoneUsageDescription</key>

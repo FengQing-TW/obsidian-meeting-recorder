@@ -1,18 +1,18 @@
-// course-recorder：錄「系統聲音＋麥克風」成一個 m4a（AAC 立體聲）
+// meeting-recorder：錄「系統聲音＋麥克風」成一個 m4a（AAC 立體聲）
 // 原理：macOS 14.4+ 的 Core Audio process tap 抓系統播出的聲音（不管各 App 選哪個喇叭），
 //       跟預設麥克風一起放進一個私有聚集裝置，同一個時脈讀出來、混音、寫檔。
-// 用法：course-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>]   收到 SIGINT／SIGTERM 就收尾存檔
+// 用法：meeting-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>]   收到 SIGINT／SIGTERM 就收尾存檔
 //         --video <輸出檔.mp4>：同時錄螢幕。啟動後跳出 macOS 的選擇視窗，選要錄的 App 或視窗（只錄它，其他畫面不會入鏡；AnnotateScreen 的標註層例外，會一起錄）；
 //                       每秒 5 格、長邊縮到 1920×1080 以內、HEVC。錄影比錄音晚開始，時間差用 VIDEO_OFFSET 告訴外掛
 //         --transcribe：同時即時辨識（Apple SpeechTranscriber，zh-TW），對方＝電腦聲音、我＝麥克風，
 //                       每句定稿就印一行「SEG<TAB>誰<TAB>開始秒<TAB>結束秒<TAB>文字」；
 //                       另外把兩路聲音各存一個 16 kHz WAV（course.wav、mic.wav）給錄完後的 whisper 精修
-//       course-recorder --list-processes    列出目前有音訊的程式（看 bundle ID 用）
+//       meeting-recorder --list-processes    列出目前有音訊的程式（看 bundle ID 用）
 // stdout 協定（給外掛讀，一行一個事件）：STARTED [LIVE]｜AUDIO｜SEG<TAB>誰<TAB>起<TAB>訖<TAB>文字｜SAVED <路徑>｜EMPTY
 //   VIDEO_PICKING｜VIDEO_STARTED <路徑>｜VIDEO_OFFSET <秒，錄影第 0 秒＝錄音第幾秒>｜VIDEO_SAVED <路徑>
 //   VIDEO_CANCELLED｜VIDEO_FAILED <原因>｜VIDEO_STOPPED <原因>
 //   EXCLUDED_PLAYING <bundle>｜LIVE_FAILED <原因>｜LIVE_STOPPED <誰>｜STALLED｜RESUMED <累計中斷秒數>｜WARN <訊息>
-// 設定：~/.config/course-recorder/config.json（沒有就用預設值）
+// 設定：~/.config/meeting-recorder/config.json（沒有就用預設值）
 //   excludeBundlePrefixes  不錄這些程式的聲音（預設 []：所有 App 的聲音都錄）
 //   micGain                麥克風音量倍率（預設 1.0；0 = 不錄麥克風）
 //   bitRate                AAC 位元率（預設 96000）
@@ -46,7 +46,7 @@ struct Config: Decodable {
     var micGain: Float?
     var bitRate: UInt32?
 }
-let configURL = URL(fileURLWithPath: NSHomeDirectory() + "/.config/course-recorder/config.json")
+let configURL = URL(fileURLWithPath: NSHomeDirectory() + "/.config/meeting-recorder/config.json")
 var configError: String? = nil
 let config: Config = {
     guard FileManager.default.fileExists(atPath: configURL.path) else { return Config() }
@@ -119,7 +119,7 @@ if args.count >= 2 && args[1] == "--list-processes" {
     for p in audioProcesses() { print("\(p.pid)\t\(p.bundle)") }
     exit(0)
 }
-// 測試用：course-recorder --selftest-video <輸出檔.mp4> <秒數> window:<視窗編號>|app:<程式 pid>
+// 測試用：meeting-recorder --selftest-video <輸出檔.mp4> <秒數> window:<視窗編號>|app:<程式 pid>
 // 不錄音、不跳系統選擇視窗，直接把指定的視窗或 App 當成「選到的範圍」錄影，用來驗證標註層有沒有一起錄到
 if args.count >= 5 && args[1] == "--selftest-video" {
     let testURL = URL(fileURLWithPath: args[2])
@@ -145,7 +145,7 @@ if args.count >= 5 && args[1] == "--selftest-video" {
     }
     testApp.run()
 }
-guard args.count >= 2 else { fail("用法：course-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>] | --list-processes") }
+guard args.count >= 2 else { fail("用法：meeting-recorder <輸出檔.m4a> [--transcribe <暫存資料夾>] | --list-processes") }
 let outURL = URL(fileURLWithPath: args[1])
 let videoURL: URL? = {
     guard let i = args.firstIndex(of: "--video"), i + 1 < args.count else { return nil }
@@ -169,7 +169,7 @@ if let p = excludedPlaying.first {
     emit("EXCLUDED_PLAYING \(p.bundle)")  // 給外掛：被排除的程式正在發聲，提醒使用者這段不會錄
 }
 let tapDesc = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded.map { $0.id })
-tapDesc.name = "course-recorder tap"
+tapDesc.name = "meeting-recorder tap"
 tapDesc.isPrivate = true
 tapDesc.muteBehavior = .unmuted
 var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -191,8 +191,8 @@ let useMic = micGain > 0 && micUID != outUID
 let mainUID = useMic ? micUID : outUID
 let subs: [[String: Any]] = [[kAudioSubDeviceUIDKey: mainUID]]
 let aggDesc: [String: Any] = [
-    kAudioAggregateDeviceNameKey: "course-recorder",
-    kAudioAggregateDeviceUIDKey: "course-recorder-" + UUID().uuidString,
+    kAudioAggregateDeviceNameKey: "meeting-recorder",
+    kAudioAggregateDeviceUIDKey: "meeting-recorder-" + UUID().uuidString,
     kAudioAggregateDeviceMainSubDeviceKey: mainUID,
     kAudioAggregateDeviceIsPrivateKey: 1,
     kAudioAggregateDeviceIsStackedKey: 0,
@@ -252,7 +252,7 @@ final class LiveTranscriber: @unchecked Sendable {
         guard let f = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
               let inF = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
               let conv = AVAudioConverter(from: inF, to: f) else {
-            throw NSError(domain: "course-recorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "語音辨識格式不支援"])
+            throw NSError(domain: "meeting-recorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "語音辨識格式不支援"])
         }
         outFormat = f; inFormat = inF; converter = conv
         let (stream, c) = AsyncStream.makeStream(of: AnalyzerInput.self)
@@ -358,7 +358,7 @@ func makeWav(_ url: URL) -> ExtAudioFileRef? {
 var courseWav: ExtAudioFileRef? = nil
 var micWav: ExtAudioFileRef? = nil
 var live: [LiveTranscriber] = []
-let feedQueue = DispatchQueue(label: "course-recorder.feed")
+let feedQueue = DispatchQueue(label: "meeting-recorder.feed")
 if let dir = transcribeDir {
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     courseWav = makeWav(dir.appendingPathComponent("course.wav"))
@@ -882,8 +882,8 @@ watchdog.setEventHandler {
 }
 watchdog.resume()
 
-// 測試用：COURSE_REC_TEST_STALL=<秒> 會在那個時間點停掉收音 8 秒再恢復，用來驗證 (b)
-if let v = ProcessInfo.processInfo.environment["COURSE_REC_TEST_STALL"], let t = Double(v) {
+// 測試用：MEETING_REC_TEST_STALL=<秒> 會在那個時間點停掉收音 8 秒再恢復，用來驗證 (b)
+if let v = ProcessInfo.processInfo.environment["MEETING_REC_TEST_STALL"], let t = Double(v) {
     DispatchQueue.main.asyncAfter(deadline: .now() + t) {
         log("測試：停掉收音 8 秒"); AudioDeviceStop(aggID, proc)
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { if !finishing { AudioDeviceStart(aggID, proc) } }

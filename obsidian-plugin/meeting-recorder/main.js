@@ -1,4 +1,4 @@
-// 錄音筆記（本機外掛）：左側按鈕＋命令，呼叫 ~/.config/course-recorder/bin/course-recorder
+// 錄音筆記（本機外掛）：左側按鈕＋命令，呼叫 ~/.config/meeting-recorder/bin/meeting-recorder
 // 1. 錄「電腦播放的聲音＋麥克風」成 m4a，同時即時產生逐字稿寫進筆記（對方＝電腦聲音、我＝麥克風）
 // 2. 錄音中貼進這篇筆記的截圖：搬進逐字稿、標上錄音時間，並用 bin/ocr 辨識圖中文字（放在圖下方、可摺疊）
 // 3. 停止後插入錄音檔，再用 whisper（transcribe.py）精修逐字稿並取代即時版；截圖保留、截圖文字當作詞彙提示
@@ -7,7 +7,7 @@
 //    自動偵測投影片換頁並截圖（video_post.py），截圖放進逐字稿；點時間會用 QuickTime 跳到影片的那個畫面
 // 7. AnnotateScreen（螢幕標註工具，github.com/FengQing-TW/annotate-screen）存到「下載」的截圖 AnnotateScreen_*.png 會自動搬進目前的筆記；
 //    錄音中則放進逐字稿、對上錄音時間、辨識文字
-// 5. 每場錄音的狀態存在 ~/.config/course-recorder/tmp/<id>/session.json；Obsidian 中途關閉或當掉，
+// 5. 每場錄音的狀態存在 ~/.config/meeting-recorder/tmp/<id>/session.json；Obsidian 中途關閉或當掉，
 //    下次啟動會自動把沒做完的（插入錄音檔、whisper 精修）補完
 // 說明：README.md 與 docs/使用說明.md
 const obsidian = require("obsidian");
@@ -17,8 +17,13 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DIR = path.join(os.homedir(), ".config/course-recorder");
-const BIN = path.join(DIR, "bin/course-recorder");
+// 錄音程式的位置：0.13.0 起改名為 ~/.config/meeting-recorder/bin/meeting-recorder。
+// 外掛由 Obsidian 自動更新、錄音程式要重跑 install.sh 才會更新，所以還沒重跑的人沿用舊位置（並提醒重跑）
+const NEW_DIR = path.join(os.homedir(), ".config/meeting-recorder");
+const OLD_DIR = path.join(os.homedir(), ".config/course-recorder");
+const LEGACY = !fs.existsSync(path.join(NEW_DIR, "bin/meeting-recorder")) && fs.existsSync(path.join(OLD_DIR, "bin/course-recorder"));
+const DIR = LEGACY ? OLD_DIR : NEW_DIR;
+const BIN = path.join(DIR, LEGACY ? "bin/course-recorder" : "bin/meeting-recorder");
 const OCR = path.join(DIR, "bin/ocr");
 const TRANSCRIBE = path.join(DIR, "transcribe.py");
 const VIDEO_POST = path.join(DIR, "video_post.py");
@@ -87,7 +92,7 @@ const runOcr = (file) => new Promise((resolve) => {
 });
 // 這個 pid 還活著、而且真的是我們的程式（pid 會被系統重複使用，所以要看指令內容）
 // 正在處理中的錄音 id。放在 globalThis：外掛被重新載入時，舊的實例還在收尾，新的實例不要重複做同一場
-const inFlight = (globalThis.__courseRecorderInFlight = globalThis.__courseRecorderInFlight || new Set());
+const inFlight = (globalThis.__meetingRecorderInFlight = globalThis.__meetingRecorderInFlight || new Set());
 const alive = (pid, needle) => {
   if (!pid) return false;
   try {
@@ -95,7 +100,7 @@ const alive = (pid, needle) => {
   } catch (_) { return false; }
 };
 
-module.exports = class CourseRecorder extends Plugin {
+module.exports = class MeetingRecorder extends Plugin {
   onload() {
     let langSetting = "auto";
     try {
@@ -110,10 +115,14 @@ module.exports = class CourseRecorder extends Plugin {
     this.busy = false;
     this.player = null;
     this.refineChain = Promise.resolve();   // whisper 一次只跑一個（模型吃 1.6 GB 以上）
+    if (LEGACY) {   // 外掛已更新、錄音程式還是舊版：照常能錄，但新功能（例如錄影錄到 AnnotateScreen 標註）要重跑 install.sh 才有
+      new Notice(T("錄音筆記：錄音程式是舊版，請在 repo 資料夾執行 git pull 與 zsh install.sh 更新（詳見 README「更新」）",
+        "Meeting Recorder: the recorder is out of date. Run git pull and zsh install.sh in the repository folder (see the README)."), 15000);
+    }
     this.ribbon = this.addRibbonIcon("mic", T("錄音筆記：開始", "Meeting Recorder: start"), (evt) => this.toggle(evt));
     // 狀態列：錄音中顯示經過時間，點一下停止（左側按鈕只有顏色，看不出錄了多久、還有沒有在錄）
     this.statusEl = this.addStatusBarItem();
-    this.statusEl.addClass("course-rec-status");
+    this.statusEl.addClass("meeting-rec-status");
     this.statusEl.setAttribute("aria-label", T("點一下停止錄音", "Click to stop recording"));
     this.registerDomEvent(this.statusEl, "click", () => { if (this.proc) this.stop(); });
     this.registerInterval(window.setInterval(() => this.refreshStatus(), 1000));
@@ -133,7 +142,7 @@ module.exports = class CourseRecorder extends Plugin {
       el.querySelectorAll("li").forEach((li) => {
         const c = li.querySelector("code");
         const t = c?.textContent.trim();
-        if (c && TIME_RE.test(t) && li.textContent.trim().startsWith(t)) c.addClass("course-rec-time");
+        if (c && TIME_RE.test(t) && li.textContent.trim().startsWith(t)) c.addClass("meeting-rec-time");
       });
     });
     this.app.workspace.onLayoutReady(() => this.recoverOrphans(false));
@@ -158,7 +167,7 @@ module.exports = class CourseRecorder extends Plugin {
     const r = !!this.proc;
     setIcon(this.ribbon, r ? "square" : "mic");
     this.ribbon.setAttribute("aria-label", r ? T("錄音筆記：停止", "Meeting Recorder: stop") : T("錄音筆記：開始", "Meeting Recorder: start"));
-    this.ribbon.toggleClass("course-rec-active", r);
+    this.ribbon.toggleClass("meeting-rec-active", r);
     this.refreshStatus();
   }
 
@@ -198,7 +207,7 @@ module.exports = class CourseRecorder extends Plugin {
         slidesDone: !!rec.slidesDone,
       };
       fs.writeFileSync(path.join(rec.tmpdir, "session.json"), JSON.stringify(data, null, 1));
-    } catch (e) { console.error("course-recorder saveSession", e); }
+    } catch (e) { console.error("meeting-recorder saveSession", e); }
   }
 
   // ---------- 改筆記 ----------
@@ -246,7 +255,7 @@ module.exports = class CourseRecorder extends Plugin {
       .then(() => this.ensureNote(rec))
       .then(() => this.editNote(rec.noteFile, fn))
       .then(() => true)
-      .catch((e) => { console.error("course-recorder edit", e); rec.lastEditError = String(e); return false; });
+      .catch((e) => { console.error("meeting-recorder edit", e); rec.lastEditError = String(e); return false; });
     return rec.queue;
   }
 
@@ -395,7 +404,7 @@ module.exports = class CourseRecorder extends Plugin {
           const lines = pending.split("\n");
           pending = lines.pop();
           for (const l of lines) {
-            try { this.onLine(rec, l, resolve, timer); } catch (e) { console.error("course-recorder onLine", e); }
+            try { this.onLine(rec, l, resolve, timer); } catch (e) { console.error("meeting-recorder onLine", e); }
           }
         });
         proc.on("error", (e) => { stderr += String(e); clearTimeout(timer); resolve(false); });
@@ -409,7 +418,7 @@ module.exports = class CourseRecorder extends Plugin {
       this.proc = proc;
       this.recording = rec;
       inFlight.add(rec.id);
-      proc.on("exit", (code) => this.finished(rec, code).catch((e) => console.error("course-recorder finished", e)));
+      proc.on("exit", (code) => this.finished(rec, code).catch((e) => console.error("meeting-recorder finished", e)));
       this.saveSession(rec);
       await this.insertBlock(rec);
 
@@ -417,7 +426,7 @@ module.exports = class CourseRecorder extends Plugin {
       rec.waiting = new Notice(T(`錄音筆記：準備中…${where}（AirPods 切換到通話模式，最多約 10 秒）`, `Meeting Recorder: preparing…${where} (switching the headset to call mode can take up to about 10 seconds)`), 0);
       if (rec.audioAt) rec.waiting.hide();
     } catch (e) {
-      console.error("course-recorder start", e);
+      console.error("meeting-recorder start", e);
       new Notice(T(`錄音筆記：開始失敗 ${e}`, `Meeting Recorder: failed to start ${e}`), 15000);
     } finally {
       this.busy = false;
@@ -425,7 +434,7 @@ module.exports = class CourseRecorder extends Plugin {
     }
   }
 
-  // 錄音程式的 stdout 協定，一行一個事件（完整列表在 course-recorder.swift 開頭）
+  // 錄音程式的 stdout 協定，一行一個事件（完整列表在 meeting-recorder.swift 開頭）
   onLine(rec, l, resolveStarted, timer) {
     if (l.startsWith("STARTED")) {
       rec.live = l.includes("LIVE");
@@ -555,7 +564,7 @@ module.exports = class CourseRecorder extends Plugin {
         }
       });
     } catch (e) {
-      console.error("course-recorder watch Downloads", e);
+      console.error("meeting-recorder watch Downloads", e);
       new Notice(T(`沒辦法監看「下載」資料夾，AnnotateScreen 截圖不會自動收進筆記：${e}\n（第一次要允許 Obsidian 取用「下載」）`, `Cannot watch the Downloads folder, so AnnotateScreen screenshots will not be imported: ${e}\n(Allow Obsidian to access Downloads on first use)`), 15000);
     }
   }
@@ -563,7 +572,7 @@ module.exports = class CourseRecorder extends Plugin {
   // 失敗（多半是檔案還沒寫完）隔 5 秒再試一次；兩次都不行才放棄，原檔留在「下載」
   tryImportAnnotate(name, attempt) {
     this.importAnnotate(name).catch((e) => {
-      console.error("course-recorder annotate import", e);
+      console.error("meeting-recorder annotate import", e);
       if (attempt < 2 && fs.existsSync(path.join(DOWNLOADS, name))) {
         setTimeout(() => { if (this.annotateWatcher) this.tryImportAnnotate(name, attempt + 1); }, 5000);
       } else {
@@ -718,7 +727,7 @@ module.exports = class CourseRecorder extends Plugin {
       await this.afterSavedInner(rec);
     } catch (e) {
       // 這裡出錯不能讓這場錄音卡在「處理中」：標成失敗、放掉，之後可以用命令補做
-      console.error("course-recorder afterSaved", e);
+      console.error("meeting-recorder afterSaved", e);
       inFlight.delete(rec.id);
       this.saveSession(rec, { state: "failed" });
       new Notice(T(`錄音筆記：錄音檔已存好，但沒能寫進筆記（${e}）。\n要重試：命令面板 →「Meeting Recorder: 補做沒完成的逐字稿精修」`, `Meeting Recorder: the audio file is saved but could not be written into the note (${e}).\nTo retry: Command palette → "Meeting Recorder: Finish incomplete transcript refinement"`), 30000);
@@ -745,7 +754,7 @@ module.exports = class CourseRecorder extends Plugin {
     if (!canRefine) { inFlight.delete(rec.id); return; }
     this.refineChain = this.refineChain
       .then(() => this.runRefine(rec))
-      .catch((e) => console.error("course-recorder refine", e))
+      .catch((e) => console.error("meeting-recorder refine", e))
       .finally(() => inFlight.delete(rec.id));
   
   }
@@ -863,7 +872,7 @@ module.exports = class CourseRecorder extends Plugin {
         const p = normalizePath(await this.app.fileManager.getAvailablePathForAttachment(name, rec.noteFile.path));
         const f = await this.app.vault.createBinary(p, fs.readFileSync(sl.file));
         return { kind: "slide", start: sl.t, link: "!" + this.app.fileManager.generateMarkdownLink(f, rec.noteFile.path), ocr: await ocrJob, names: fileNames(f.name) };
-      } catch (e) { console.error("course-recorder slide", e); return null; }
+      } catch (e) { console.error("meeting-recorder slide", e); return null; }
     }));
     rec.slides = made.filter(Boolean);
     rec.slidesDone = true;
@@ -880,7 +889,7 @@ module.exports = class CourseRecorder extends Plugin {
       let s;
       try { s = JSON.parse(fs.readFileSync(sf, "utf8")); } catch (_) { continue; }
       if (inFlight.has(s.id)) continue;   // 這場還在錄，或已經在排隊精修
-      if (alive(s.pid, "course-recorder") || alive(s.refinePid, "transcribe.py")) { stillRunning++; continue; }   // 還在跑，不要重複做
+      if (alive(s.pid, "meeting-recorder") || alive(s.pid, "course-recorder") || alive(s.refinePid, "transcribe.py")) { stillRunning++; continue; }   // 還在跑，不要重複做
       if (!manual && s.recovered) {   // 自動復原每場只試一次，避免每次啟動都重跑一樣的失敗
         leftover++;
         try { for (const n of fs.readdirSync(tmpdir)) leftoverBytes += fs.statSync(path.join(tmpdir, n)).size; } catch (_) { /* 算不出來就算了 */ }
@@ -903,7 +912,7 @@ module.exports = class CourseRecorder extends Plugin {
     if (!manual && stillRunning && round < 5) setTimeout(() => this.recoverOrphans(false, round + 1), 30000);
     // 補做過一次還是沒完成的：暫存不會自己消失（每小時錄音約 230 MB），提醒一次
     if (!manual && round === 0 && leftover) {
-      new Notice(T(`錄音筆記：有 ${leftover} 場錄音的逐字稿精修沒完成，暫存佔 ${Math.round(leftoverBytes / 1e6)} MB。\n重試：命令面板 →「補做沒完成的逐字稿精修」；不要了就刪掉 ~/.config/course-recorder/tmp/ 裡的資料夾`, `Meeting Recorder: ${leftover} recordings have unfinished transcript refinement, using ${Math.round(leftoverBytes / 1e6)} MB of temporary files.\nRetry: Command palette → "Finish incomplete transcript refinement"; or delete the folders in ~/.config/course-recorder/tmp/ if you do not need them`), 20000);
+      new Notice(T(`錄音筆記：有 ${leftover} 場錄音的逐字稿精修沒完成，暫存佔 ${Math.round(leftoverBytes / 1e6)} MB。\n重試：命令面板 →「補做沒完成的逐字稿精修」；不要了就刪掉 ${TMP} 裡的資料夾`, `Meeting Recorder: ${leftover} recordings have unfinished transcript refinement, using ${Math.round(leftoverBytes / 1e6)} MB of temporary files.\nRetry: Command palette → "Finish incomplete transcript refinement"; or delete the folders in ${TMP} if you do not need them`), 20000);
     }
   }
 

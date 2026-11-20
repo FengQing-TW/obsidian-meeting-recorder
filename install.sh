@@ -9,7 +9,8 @@ emulate -L zsh
 setopt err_return no_unset pipe_fail 2>/dev/null
 PKG=${0:A:h}
 STAMP=$(date +%Y%m%d-%H%M%S)
-CONFIG_DIR=${CONFIG_DIR:-$HOME/.config/course-recorder}
+CONFIG_DIR=${CONFIG_DIR:-$HOME/.config/meeting-recorder}
+OLD_CONFIG_DIR=${OLD_CONFIG_DIR:-$HOME/.config/course-recorder}   # 0.12 以前的位置（0.13.0 改名）
 MODEL_DIR=${MODEL_DIR:-$HOME/Library/Application Support/whisper.cpp/models}
 VAULT_DIR=${VAULT_DIR:-}
 BREW=/opt/homebrew/bin/brew
@@ -58,25 +59,40 @@ fi
 
 # ---------- 3. 錄音程式 ----------
 step "安裝錄音程式到 $CONFIG_DIR"
+# 0.12 以前裝在 ~/.config/course-recorder：整個搬過來（設定、暫存、沒做完的精修都跟著走），
+# 舊位置留一個指向新位置的捷徑，舊錄音的暫存紀錄裡寫的舊路徑照樣找得到
+if [[ -d $OLD_CONFIG_DIR && ! -L $OLD_CONFIG_DIR && ! -e $CONFIG_DIR ]]; then
+  mkdir -p "${CONFIG_DIR:h}"
+  mv "$OLD_CONFIG_DIR" "$CONFIG_DIR" && ln -s "$CONFIG_DIR" "$OLD_CONFIG_DIR" \
+    && DONE+=("舊位置 $OLD_CONFIG_DIR 已搬到 $CONFIG_DIR（舊位置留捷徑）")
+  mkdir -p "$CONFIG_DIR/backup"
+  [[ -e $CONFIG_DIR/course-recorder.swift ]] && mv "$CONFIG_DIR/course-recorder.swift" "$CONFIG_DIR/backup/course-recorder.swift.$STAMP"
+elif [[ -d $OLD_CONFIG_DIR && ! -L $OLD_CONFIG_DIR ]]; then
+  WARN+=("$OLD_CONFIG_DIR 和 $CONFIG_DIR 同時存在，舊的沒有搬。確認舊的沒有要補做的錄音後可以自己刪掉")
+fi
 mkdir -p "$CONFIG_DIR/bin" "$CONFIG_DIR/backup"
-for f in course-recorder.swift ocr.swift Info.plist transcribe.py video_post.py; do
+for f in meeting-recorder.swift ocr.swift Info.plist transcribe.py video_post.py; do
   [[ -e $CONFIG_DIR/$f ]] && cp -p "$CONFIG_DIR/$f" "$CONFIG_DIR/backup/$f.$STAMP"
-  cp "$PKG/course-recorder/$f" "$CONFIG_DIR/$f"
+  cp "$PKG/recorder/$f" "$CONFIG_DIR/$f"
 done
 # 在這台重新編譯：最低系統版本會對上這台，也不會有從別台複製執行檔被系統擋下的問題
 BUILT=0
 if (( OSMAJOR >= 26 )); then
   say "   編譯中（約 1 分鐘）…"
-  if ( cd "$CONFIG_DIR" && swiftc -O -swift-version 5 -o bin/course-recorder.new course-recorder.swift \
+  if ( cd "$CONFIG_DIR" && swiftc -O -swift-version 5 -o bin/meeting-recorder.new meeting-recorder.swift \
          -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist 2>"$CONFIG_DIR/build.log" \
        && swiftc -O -swift-version 5 -o bin/ocr.new ocr.swift 2>>"$CONFIG_DIR/build.log" ); then
-    mv "$CONFIG_DIR/bin/course-recorder.new" "$CONFIG_DIR/bin/course-recorder"; mv "$CONFIG_DIR/bin/ocr.new" "$CONFIG_DIR/bin/ocr"; BUILT=1
+    mv "$CONFIG_DIR/bin/meeting-recorder.new" "$CONFIG_DIR/bin/meeting-recorder"; mv "$CONFIG_DIR/bin/ocr.new" "$CONFIG_DIR/bin/ocr"; BUILT=1
+    # 舊名稱留捷徑：已經開著的 Obsidian、還沒更新的 0.12 外掛都找 bin/course-recorder
+    # （舊的執行檔編好新版才換掉：編譯失敗時舊版還能用）
+    [[ -f $CONFIG_DIR/bin/course-recorder && ! -L $CONFIG_DIR/bin/course-recorder ]] && mv "$CONFIG_DIR/bin/course-recorder" "$CONFIG_DIR/backup/course-recorder.bin.$STAMP"
+    ln -sfn meeting-recorder "$CONFIG_DIR/bin/course-recorder"
   else
     rm -f "$CONFIG_DIR/bin/"*.new
     say "   編譯失敗（訊息在 $CONFIG_DIR/build.log）"
   fi
 fi
-if (( BUILT )) && "$CONFIG_DIR/bin/course-recorder" --selftest-limiter >/dev/null 2>&1; then
+if (( BUILT )) && "$CONFIG_DIR/bin/meeting-recorder" --selftest-limiter >/dev/null 2>&1; then
   DONE+=("錄音程式（本機編譯）")
 else
   WARN+=("錄音程式沒有編譯成功或跑不起來（需要 macOS 26 以上與 Command Line Tools）。訊息在 $CONFIG_DIR/build.log")
@@ -121,7 +137,9 @@ if [[ -n $VAULT_DIR && -d $VAULT_DIR/.obsidian ]]; then
     [[ -f $CONFIG_DIR/backup/plugin-course-recorder.$STAMP/data.json ]] && OLD_DATA="$CONFIG_DIR/backup/plugin-course-recorder.$STAMP/data.json"
   fi
   if [[ -d $PLUG ]]; then
-    mkdir -p "$CONFIG_DIR/backup/plugin.$STAMP" && cp -p "$PLUG"/* "$CONFIG_DIR/backup/plugin.$STAMP/" 2>/dev/null
+    typeset -a OLD_FILES; OLD_FILES=("$PLUG"/*(N.))   # (N)：資料夾是空的也不報錯
+    mkdir -p "$CONFIG_DIR/backup/plugin.$STAMP"
+    (( ${#OLD_FILES} )) && cp -p $OLD_FILES "$CONFIG_DIR/backup/plugin.$STAMP/"
     [[ -f $PLUG/data.json ]] && cp -p "$PLUG/data.json" "$CONFIG_DIR/backup/plugin.$STAMP.data.json"
   fi
   mkdir -p "$PLUG" && cp "$PKG/obsidian-plugin/meeting-recorder/"{main.js,manifest.json,styles.css} "$PLUG/"

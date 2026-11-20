@@ -1,6 +1,6 @@
 /* 錄音中：左側按鈕變紅色 */
-.side-dock-ribbon-action.course-rec-active { color: var(--color-red); }
+.side-dock-ribbon-action.meeting-rec-active { color: var(--color-red); }
 /* 閱讀模式：逐字稿的時間可以點，點了從那裡播放錄音 */
-code.course-rec-time { cursor: pointer; border-bottom: 1px dotted currentColor; }
+code.meeting-rec-time { cursor: pointer; border-bottom: 1px dotted currentColor; }
 /* 狀態列的錄音時間：紅字、可點（點一下停止） */
-.status-bar-item.course-rec-status { color: var(--color-red); cursor: pointer; font-variant-numeric: tabular-nums; }
+.status-bar-item.meeting-rec-status { color: var(--color-red); cursor: pointer; font-variant-numeric: tabular-nums; }

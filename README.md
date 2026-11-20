@@ -70,7 +70,7 @@ zsh install.sh
 腳本會依序做這些事：
 
 1. 檢查環境，問你要不要用 Homebrew 裝缺的套件
-2. 把錄音程式放到 `~/.config/course-recorder/`，並在本機編譯
+2. 把錄音程式放到 `~/.config/meeting-recorder/`，並在本機編譯
 3. 問你要不要下載模型
 4. 把外掛裝進你指定的 vault（Obsidian 的筆記資料夾）。已經從社群外掛目錄裝過外掛的話，這一步可以跳過
 
@@ -114,7 +114,7 @@ zsh install.sh
 
 ## 它會動到哪些地方
 
-- **vault 以外的檔案：** 外掛會執行放在 `~/.config/course-recorder/` 的錄音程式和腳本，逐字稿完成前的暫存錄音也放在這裡。畫面錄影存到 `~/Downloads/螢幕錄影/`（介面是英文時為 `~/Downloads/Screen Recordings/`）。外掛會留意 `~/Downloads` 裡 AnnotateScreen 的截圖，把它收進筆記。
+- **vault 以外的檔案：** 外掛會執行放在 `~/.config/meeting-recorder/` 的錄音程式和腳本，逐字稿完成前的暫存錄音也放在這裡（0.12 以前在 `~/.config/course-recorder/`；`install.sh` 會搬過來，舊位置留一個指向新位置的捷徑）。畫面錄影存到 `~/Downloads/螢幕錄影/`（介面是英文時為 `~/Downloads/Screen Recordings/`）。外掛會留意 `~/Downloads` 裡 AnnotateScreen 的截圖，把它收進筆記。
 - **網路：** 外掛和錄音程式不發出網路請求。語音與文字辨識用 macOS 內建功能和本機的 whisper 模型。只有 `install.sh` 會連網路，而且是在你同意之後：用 Homebrew 裝套件、從 Hugging Face 下載 1.6 GB 的 whisper 模型。macOS 第一次使用語音辨識時，可能會自己下載系統的辨識資料。
 - **帳號與費用：** 不用註冊帳號，不收費，沒有廣告，不蒐集使用資料。
 - **介面語言：** 預設跟著 Obsidian。要固定語言，在外掛的 `data.json` 加上 `"lang": "zh"` 或 `"lang": "en"`。
@@ -144,14 +144,14 @@ MIT，見 [LICENSE](LICENSE)。相依的 whisper.cpp、OpenCC、ffmpeg 由你自
 **Before you install**
 
 - **macOS only, Apple Silicon, macOS 26 or later.** The plugin is desktop-only.
-- **The plugin needs a separate one-time setup.** Installing the plugin alone is not enough: run `zsh install.sh` from this repository in Terminal. It compiles a small Swift recorder on your Mac and places it in `~/.config/course-recorder/`. Without it the record button shows "recorder not found".
+- **The plugin needs a separate one-time setup.** Installing the plugin alone is not enough: run `zsh install.sh` from this repository in Terminal. It compiles a small Swift recorder on your Mac and places it in `~/.config/meeting-recorder/`. Without it the record button shows "recorder not found".
 - **After each plugin update, run `git pull` and `zsh install.sh` again.** Updating the plugin in Obsidian does not update the recorder.
 - **Transcription currently supports Mandarin Chinese only** (live transcript and whisper refinement). The interface follows Obsidian's language (Chinese or English).
 - **Please tell other participants before you record.** It records everything your Mac plays, including other people in a meeting. Follow your organizer's rules and local law.
 
 **Disclosures (as required by the Obsidian developer policies)**
 
-- **Files outside your vault:** the plugin runs the recorder and scripts in `~/.config/course-recorder/`, keeps temporary audio there until a transcript is finished, saves screen recordings to `~/Downloads/Screen Recordings/` (or `~/Downloads/螢幕錄影/` with the Chinese interface), and watches `~/Downloads` for AnnotateScreen screenshots to import.
+- **Files outside your vault:** the plugin runs the recorder and scripts in `~/.config/meeting-recorder/` (before 0.13 this was `~/.config/course-recorder/`; `install.sh` moves it and leaves a link at the old path), keeps temporary audio there until a transcript is finished, saves screen recordings to `~/Downloads/Screen Recordings/` (or `~/Downloads/螢幕錄影/` with the Chinese interface), and watches `~/Downloads` for AnnotateScreen screenshots to import.
 - **Network use:** the plugin and the recorder make no network requests. Speech and text recognition use the macOS built-in recognizers and a local whisper model. Only `install.sh` uses the network, and only after you confirm: Homebrew packages and the 1.6 GB whisper model from Hugging Face. macOS may download its own speech recognition assets the first time.
 - **No account, no payment, no ads, no telemetry.** The plugin is free. If it saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.com/fengqingtech).
 
