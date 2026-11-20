@@ -86,6 +86,18 @@ zsh install.sh
 
 **不管從哪裡裝外掛，都要在終端機執行一次 `install.sh`。** 它會在本機編譯錄音程式，外掛靠這支程式錄音；沒有它，按錄音會顯示找不到錄音程式。
 
+### 更新
+
+Obsidian 更新外掛只會換掉外掛本身，**錄音程式不會跟著更新**。每次更新外掛後，到 repo 資料夾拉最新版、再執行一次安裝腳本：
+
+```zsh
+cd obsidian-meeting-recorder
+git pull
+zsh install.sh
+```
+
+已經下載過的模型不會重新下載，舊檔會先備份。
+
 ## 開始錄音
 
 1. 打開要放逐字稿的筆記，按左側的麥克風按鈕，選「只錄音」或「錄音＋錄 App 畫面…」。選了之後才開始錄。錄 App 畫面時，AnnotateScreen 畫的標註會一起錄進去（工具列不會）。
@@ -133,6 +145,7 @@ MIT，見 [LICENSE](LICENSE)。相依的 whisper.cpp、OpenCC、ffmpeg 由你自
 
 - **macOS only, Apple Silicon, macOS 26 or later.** The plugin is desktop-only.
 - **The plugin needs a separate one-time setup.** Installing the plugin alone is not enough: run `zsh install.sh` from this repository in Terminal. It compiles a small Swift recorder on your Mac and places it in `~/.config/course-recorder/`. Without it the record button shows "recorder not found".
+- **After each plugin update, run `git pull` and `zsh install.sh` again.** Updating the plugin in Obsidian does not update the recorder.
 - **Transcription currently supports Mandarin Chinese only** (live transcript and whisper refinement). The interface follows Obsidian's language (Chinese or English).
 - **Please tell other participants before you record.** It records everything your Mac plays, including other people in a meeting. Follow your organizer's rules and local law.
 
